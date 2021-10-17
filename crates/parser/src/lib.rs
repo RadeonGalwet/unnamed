@@ -32,7 +32,6 @@ impl<'a> Parser<'a> {
       TokenKind::Plus | TokenKind::Minus => {
         let expression = Self::prefix_binding_power(&next_token.kind).unwrap();
         let operator = match next_token.kind {
-          TokenKind::Plus => UnaryOperator::Plus,
           TokenKind::Minus => UnaryOperator::Minus,
           _ => unreachable!(),
         };

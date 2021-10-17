@@ -1,0 +1,12 @@
+[package]
+name = "compiler"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm12-0"] }
+ast = { path = "../ast" }
+enum-as-inner = "0.3.3"
+
+[dev-dependencies]
+parser = { path = "../parser" }

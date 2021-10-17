@@ -8,7 +8,6 @@ pub enum Operator {
 
 #[derive(Debug, PartialEq)]
 pub enum UnaryOperator {
-  Plus,
   Minus,
 }
 #[derive(Debug, PartialEq)]
