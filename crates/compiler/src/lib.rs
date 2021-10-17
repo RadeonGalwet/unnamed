@@ -188,7 +188,7 @@ impl<'a> Compiler<'a> {
 mod tests {
   use std::f64::consts::PI;
 
-  use inkwell::{context::Context};
+  use inkwell::context::Context;
   use parser::Parser;
 
   use crate::{value::Value, Compiler};
