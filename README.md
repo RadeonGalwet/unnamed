@@ -1,2 +1,6 @@
-# Trying
-Another attempt to write programing language
+# Unnamed Language
+
+## To Do
+
+- [ ] Refactor compiler
+- [ ] Write tests for parser/lexer
