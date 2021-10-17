@@ -1,20 +1,143 @@
-use ast::{Expression, Node, Operator, TopLevel, UnaryOperator};
+use ast::{
+  Argument, Expression, Node, Operator, Statement, TopLevel, TopLevelItem, Type, UnaryOperator,
+};
 use lexer::TokenKind;
 use source::Source;
-
+use state::State;
 pub mod source;
+pub mod state;
+
 pub struct Parser<'a> {
   pub(crate) source: Source<'a>,
+  pub(crate) state: State,
 }
 
 impl<'a> Parser<'a> {
   pub fn new(source: &'a str) -> Self {
     Self {
       source: Source::new(source),
+      state: State::None,
     }
   }
+  pub fn update_state(&mut self, state: State) {
+    self.state = state;
+  }
   pub fn parse(&mut self) -> Result<TopLevel<'a>, String> {
-    Ok(TopLevel::Expression(self.parse_expression()?))
+    self.parse_top_level()
+  }
+  pub fn arguments<F, T>(&mut self, function: F, test: Option<TokenKind>) -> Result<Vec<T>, String>
+  where
+    F: Fn(&mut Self) -> Result<T, String>,
+  {
+    let mut args = vec![];
+    loop {
+      if let Some(test) = test {
+        if self.source.test(test) {
+          args.push(function(self)?);
+        } else {
+          break;
+        }
+      } else {
+        args.push(function(self)?);
+      }
+      if !self.source.test_and_next(TokenKind::Comma)? {
+        break;
+      }
+    }
+    Ok(args)
+  }
+  pub fn parse_top_level(&mut self) -> Result<TopLevel<'a>, String> {
+    let mut items = vec![];
+    while self.source.peek().is_ok() {
+      let token = self.source.next_token()?;
+      match token.kind {
+        TokenKind::Function => {
+          self.update_state(State::Function);
+          let identifier = self.source.consume(TokenKind::Identifier)?.value;
+          self.source.consume(TokenKind::LeftParentheses)?;
+          let arguments = self.arguments(
+            |parser| {
+              let id = parser.source.consume(TokenKind::Identifier)?.value;
+              parser.source.consume(TokenKind::Colon)?;
+              let type_name = parser.source.consume(TokenKind::Identifier)?.value;
+              Ok(Argument {
+                name: Box::new(Node::Identifier(id)),
+                type_name: Type {
+                  name: Box::new(Node::Identifier(type_name)),
+                  type_arguments: None,
+                },
+              })
+            },
+            Some(TokenKind::Identifier),
+          )?;
+          self.source.consume(TokenKind::RightParentheses)?;
+          let return_type = if self.source.test_and_next(TokenKind::Arrow)? {
+            Type {
+              name: Box::new(Node::Identifier(
+                self.source.consume(TokenKind::Identifier)?.value,
+              )),
+              type_arguments: None,
+            }
+          } else {
+            Type {
+              name: Box::new(Node::Identifier("void")),
+              type_arguments: None,
+            }
+          };
+          let body = if self.source.test_and_next(TokenKind::Assignment)? {
+            let expression = self.parse_expression()?;
+            self.source.consume(TokenKind::SemiColon)?;
+            expression
+          } else {
+            self.parse_block()?
+          };
+          items.push(TopLevelItem::Function {
+            name: Box::new(Node::Identifier(identifier)),
+            arguments,
+            return_type,
+            body: Box::new(body),
+          });
+        }
+        _ => return Err(format!("Expected function, found {}", token.value)),
+      };
+    }
+
+    Ok(TopLevel::Items(items))
+  }
+  pub fn statement(&mut self) -> Result<Node<'a>, String> {
+    let token = self.source.peek()?;
+    match token.kind {
+      TokenKind::Return => {
+        self.source.next_token()?;
+        if self.state != State::Function {
+          return Err("Return outside of function".to_string());
+        }
+        if self.source.test_and_next(TokenKind::SemiColon)? {
+          Ok(Node::Statement(Statement::Return(None)))
+        } else {
+          println!("{:?}", self.source.peek());
+          let expression = self.parse_expression()?;
+          self.source.consume(TokenKind::SemiColon)?;
+          Ok(Node::Statement(Statement::Return(Some(Box::new(
+            expression,
+          )))))
+        }
+      }
+      _ => {
+        let expression = self.parse_expression()?;
+        self.source.consume(TokenKind::SemiColon)?;
+        Ok(expression)
+      }
+    }
+  }
+  pub fn parse_block(&mut self) -> Result<Node<'a>, String> {
+    let mut statements = vec![];
+    self.source.consume(TokenKind::LeftBracket)?;
+    while !self.source.test(TokenKind::RightBracket) && self.source.peek().is_ok() {
+      statements.push(self.statement()?)
+    }
+    self.source.consume(TokenKind::RightBracket)?;
+    Ok(Node::Block(statements))
   }
   pub fn parse_expression(&mut self) -> Result<Node<'a>, String> {
     self.parse_expression_with_binding_power(0)
@@ -29,7 +152,7 @@ impl<'a> Parser<'a> {
       TokenKind::Number => Node::Integer(next_token.value),
       TokenKind::Float => Node::Float(next_token.value),
       TokenKind::Identifier => Node::Identifier(next_token.value),
-      TokenKind::Plus | TokenKind::Minus => {
+      TokenKind::Minus => {
         let expression = Self::prefix_binding_power(&next_token.kind).unwrap();
         let operator = match next_token.kind {
           TokenKind::Minus => UnaryOperator::Minus,

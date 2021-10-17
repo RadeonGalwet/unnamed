@@ -45,7 +45,7 @@ pub enum TokenKind {
   #[error]
   Error,
 
-  #[regex("[a-zA-Z_]+")]
+  #[regex("[-a-zA-Z_][a-zA-Z0-9_-]*")]
   Identifier,
 
   #[regex("[0-9]+", priority = 2)]
@@ -62,13 +62,30 @@ pub enum TokenKind {
   Multiply,
   #[token("/")]
   Divide,
-  #[token("^")]
-  Power,
+  #[token("=")]
+  Assignment,
 
   #[token("(")]
   LeftParentheses,
   #[token(")")]
   RightParentheses,
+  #[token("{")]
+  LeftBracket,
+  #[token("}")]
+  RightBracket,
+  #[token("->")]
+  Arrow,
+  #[token(",")]
+  Comma,
+  #[token(":")]
+  Colon,
+  #[token(";")]
+  SemiColon,
+
+  #[token("function")]
+  Function,
+  #[token("return")]
+  Return,
 }
 
 #[cfg(test)]

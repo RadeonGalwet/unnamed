@@ -14,6 +14,9 @@ dependencies = [
 [[package]]
 name = "ast"
 version = "0.1.0"
+dependencies = [
+ "enum-as-inner",
+]
 
 [[package]]
 name = "beef"
