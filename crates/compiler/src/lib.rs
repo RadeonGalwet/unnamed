@@ -209,15 +209,8 @@ impl<'a> Compiler<'a> {
   pub fn compile_expression(&mut self, expression: Expression<'a>) -> Result<Value<'a>, String> {
     match expression {
       Expression::Binary { operator, lhs, rhs } => {
-        let mut lhs = self.compile_node(*lhs)?.unwrap();
-        if let Some((ptr, ptr_type)) = lhs.as_pointer() {
-          lhs = load_ptr!(ptr_type, ptr, self);
-        }
-
-        let mut rhs = self.compile_node(*rhs)?.unwrap();
-        if let Some((ptr, ptr_type)) = rhs.as_pointer() {
-          rhs = load_ptr!(ptr_type, ptr, self);
-        }
+        let lhs = self.compile_node(*lhs)?.unwrap();
+        let rhs = self.compile_node(*rhs)?.unwrap();
         match (lhs, rhs) {
           (Value::I16(lhs), Value::I16(rhs)) => Ok(infix!(
             self,
@@ -311,10 +304,7 @@ impl<'a> Compiler<'a> {
         }
       }
       Expression::Unary { operator, argument } => {
-        let mut argument = self.compile_node(*argument)?.unwrap();
-        if let Some((ptr, ptr_type)) = argument.as_pointer() {
-          argument = load_ptr!(ptr_type, ptr, self);
-        }
+        let argument = self.compile_node(*argument)?.unwrap();
         match argument {
           Value::I16(int) => Ok(prefix!(self, operator, int, build_int_neg, I16)),
           Value::I32(int) => Ok(prefix!(self, operator, int, build_int_neg, I32)),
