@@ -45,7 +45,7 @@ pub enum TokenKind {
   #[error]
   Error,
 
-  #[regex("[-a-zA-Z_][a-zA-Z0-9_-]*")]
+  #[regex("[a-zA-Z_][a-zA-Z0-9_-]*")]
   Identifier,
 
   #[regex("[0-9]+", priority = 2)]
@@ -70,9 +70,9 @@ pub enum TokenKind {
   #[token(")")]
   RightParentheses,
   #[token("{")]
-  LeftBracket,
+  LeftCurly,
   #[token("}")]
-  RightBracket,
+  RightCurly,
   #[token("->")]
   Arrow,
   #[token(",")]
@@ -125,11 +125,47 @@ mod tests {
     check("/", TokenKind::Divide)
   }
   #[test]
+  fn can_parse_assignment() {
+    check("=", TokenKind::Assignment)
+  }
+  #[test]
   fn can_parse_left_parentheses() {
     check("(", TokenKind::LeftParentheses)
   }
   #[test]
   fn can_parse_right_parentheses() {
     check(")", TokenKind::RightParentheses)
+  }
+  #[test]
+  fn can_parse_left_curly() {
+    check("{", TokenKind::LeftCurly)
+  }
+  #[test]
+  fn can_parse_right_curly() {
+    check("}", TokenKind::RightCurly)
+  }
+  #[test]
+  fn can_parse_arrow() {
+    check("->", TokenKind::Arrow)
+  }
+  #[test]
+  fn can_parse_comma() {
+    check(",", TokenKind::Comma)
+  }
+  #[test]
+  fn can_parse_colon() {
+    check(":", TokenKind::Colon)
+  }
+  #[test]
+  fn can_parse_semi_colon() {
+    check(";", TokenKind::SemiColon)
+  }
+  #[test]
+  fn can_parse_function_keyword() {
+    check("function", TokenKind::Function)
+  }
+  #[test]
+  fn can_parse_return_keyword() {
+    check("return", TokenKind::Return)
   }
 }

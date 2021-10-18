@@ -3,7 +3,7 @@ use inkwell::values::{BasicValueEnum, FloatValue, IntValue, PointerValue};
 
 use crate::r#type::Type;
 
-#[derive(Debug, EnumAsInner, Clone)]
+#[derive(Debug, EnumAsInner, Clone, Copy)]
 pub enum Value<'a> {
   I16(IntValue<'a>),
   I32(IntValue<'a>),

@@ -2,5 +2,5 @@
 
 ## To Do
 
-- [ ] Refactor compiler
-- [ ] Write tests for parser/lexer
+- [x] Refactor compiler
+- [x] Write tests for parser/lexer

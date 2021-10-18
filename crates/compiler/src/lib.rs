@@ -27,6 +27,7 @@ pub struct Compiler<'a> {
   module: Module<'a>,
   fpm: PassManager<FunctionValue<'a>>,
   named_values: HashMap<&'a str, Value<'a>>,
+  variables: HashMap<&'a str, Value<'a>>,
 }
 
 impl<'a> Compiler<'a> {
@@ -41,6 +42,7 @@ impl<'a> Compiler<'a> {
       builder,
       module,
       fpm,
+      variables: HashMap::new(),
       named_values: HashMap::new(),
     }
   }
@@ -62,19 +64,6 @@ impl<'a> Compiler<'a> {
     builder.build_alloca(alloca_type, name)
   }
   pub fn compile(&mut self, top_level: TopLevel<'a>) -> Result<(), String> {
-    // let void = self.context.void_type();
-    // let main_fn_type = void.fn_type(&[], false);
-    // let main = self.module.add_function("main", main_fn_type, None);
-    // let entry = self.context.append_basic_block(main, "main");
-    // self.builder.position_at_end(entry);
-    // let compiled = self.compile_top_level(top_level)?;
-    // let alloca = self
-    //   .builder
-    //   .build_alloca(BasicValueEnum::from(&compiled).get_type(), "tmp_alloca");
-    // let _ = self
-    //   .builder
-    //   .build_store(alloca, BasicValueEnum::from(&compiled));
-    // self.builder.build_return(None);
     self.compile_top_level(top_level)?;
     Ok(())
   }
@@ -85,7 +74,6 @@ impl<'a> Compiler<'a> {
           self.compile_top_level_item(item)?;
         }
       }
-      _ => unreachable!(),
     };
     Ok(())
   }
@@ -96,48 +84,41 @@ impl<'a> Compiler<'a> {
         arguments,
         body,
         return_type,
-      } => self.compile_function(*name, arguments, *body, return_type),
+      } => self.compile_function(name, arguments, *body, return_type),
     }
   }
   pub fn compile_function(
     &mut self,
-    name: Node<'a>,
+    name: &'a str,
     arguments: Vec<Argument<'a>>,
     body: Node<'a>,
     return_type: Type<'a>,
   ) -> Result<(), String> {
-    let old_named = self.named_values.clone();
-    let name = name.as_identifier().unwrap();
     let mut transformed_arguments = vec![];
     for argument in &arguments {
-      let id = match *argument.type_name.name {
-        Node::Identifier(id) => id,
-        _ => unreachable!(),
-      };
+      let id = argument.argument_type.name;
       transformed_arguments.push(self.patch_type(id)?)
     }
-    let return_type = self.patch_type(return_type.name.into_identifier().unwrap())?;
+    let return_type = self.patch_type(return_type.name)?;
     let fn_type = return_type.fn_type(transformed_arguments.as_slice(), false);
     let fn_value = self.module.add_function(name, fn_type, None);
     let block = self.context.append_basic_block(fn_value, name);
     self.builder.position_at_end(block);
     for (index, value) in fn_value.get_param_iter().enumerate() {
       let argument = &arguments[index];
-      let type_of = transformed_arguments[index];
-      let name = match *argument.name {
-        Node::Identifier(id) => id,
-        _ => unreachable!(),
-      };
-      let type_name = match *argument.type_name.name {
-        Node::Identifier(id) => id,
-        _ => unreachable!(),
-      };
-      value.set_name(name);
-      let pointer = self.start_alloca(block, type_of, format!("{}_ptr", name).as_str(), fn_value);
+      value.set_name(argument.name);
+      let argument_type = transformed_arguments[index];
+      let type_name = argument.argument_type.name;
+      let pointer = self.start_alloca(
+        block,
+        argument_type,
+        format!("{}_ptr", name).as_str(),
+        fn_value,
+      );
       self.builder.build_store(pointer, value);
       self
-        .named_values
-        .insert(name, Value::Pointer(pointer, RuntimeType::from(type_name)));
+        .variables
+        .insert(argument.name, Value::Pointer(pointer, RuntimeType::from(type_name)));
     }
     match body {
       Node::Expression(expression) => {
@@ -158,7 +139,6 @@ impl<'a> Compiler<'a> {
     } else {
       return Err("Invalid function generated".to_string());
     }
-    self.named_values = old_named;
     Ok(())
   }
 
@@ -178,15 +158,21 @@ impl<'a> Compiler<'a> {
 
   pub fn compile_node(&mut self, node: Node<'a>) -> Result<Option<Value<'a>>, String> {
     match node {
-      Node::Identifier(id) => Ok(
-        Some(
-          self
+      Node::Identifier(id) => {
+        let mut value = if let Some(value) = self.variables.get(id) {
+          *value
+        } else {
+          let value = self
             .named_values
             .get(id)
-            .ok_or(format!("Unknown constant {}", id))?
-            .clone(),
-        ), // TODO: Remove clone here
-      ),
+            .ok_or(format!("Unknown variable {}", id))?;
+          *value
+        };
+        if let Some((ptr, ptr_type)) = value.as_pointer() {
+          value = load_ptr!(ptr_type, ptr, self);
+        }
+        Ok(Some(value))
+      }
       Node::Integer(integer) => Ok(Some(Value::I32(
         self
           .context
@@ -225,70 +211,12 @@ impl<'a> Compiler<'a> {
       Expression::Binary { operator, lhs, rhs } => {
         let mut lhs = self.compile_node(*lhs)?.unwrap();
         if let Some((ptr, ptr_type)) = lhs.as_pointer() {
-          lhs = match ptr_type {
-            RuntimeType::I16 => {
-              Value::I16(self.builder.build_load(*ptr, "i16_load").into_int_value())
-            }
-            RuntimeType::I32 => {
-              Value::I32(self.builder.build_load(*ptr, "i32_load").into_int_value())
-            }
-            RuntimeType::I64 => {
-              Value::I64(self.builder.build_load(*ptr, "i64_load").into_int_value())
-            }
-            RuntimeType::I128 => {
-              Value::I128(self.builder.build_load(*ptr, "i128_load").into_int_value())
-            }
-            RuntimeType::F16 => {
-              Value::F16(self.builder.build_load(*ptr, "f16_load").into_float_value())
-            }
-            RuntimeType::F32 => {
-              Value::F32(self.builder.build_load(*ptr, "f32_load").into_float_value())
-            }
-            RuntimeType::F64 => {
-              Value::F64(self.builder.build_load(*ptr, "f64_load").into_float_value())
-            }
-            RuntimeType::F128 => Value::F128(
-              self
-                .builder
-                .build_load(*ptr, "f128_load")
-                .into_float_value(),
-            ),
-            RuntimeType::Pointer => unreachable!(),
-          };
+          lhs = load_ptr!(ptr_type, ptr, self);
         }
 
         let mut rhs = self.compile_node(*rhs)?.unwrap();
         if let Some((ptr, ptr_type)) = rhs.as_pointer() {
-          rhs = match ptr_type {
-            RuntimeType::I16 => {
-              Value::I16(self.builder.build_load(*ptr, "i16_load").into_int_value())
-            }
-            RuntimeType::I32 => {
-              Value::I32(self.builder.build_load(*ptr, "i32_load").into_int_value())
-            }
-            RuntimeType::I64 => {
-              Value::I64(self.builder.build_load(*ptr, "i64_load").into_int_value())
-            }
-            RuntimeType::I128 => {
-              Value::I128(self.builder.build_load(*ptr, "i128_load").into_int_value())
-            }
-            RuntimeType::F16 => {
-              Value::F16(self.builder.build_load(*ptr, "f16_load").into_float_value())
-            }
-            RuntimeType::F32 => {
-              Value::F32(self.builder.build_load(*ptr, "f32_load").into_float_value())
-            }
-            RuntimeType::F64 => {
-              Value::F64(self.builder.build_load(*ptr, "f64_load").into_float_value())
-            }
-            RuntimeType::F128 => Value::F128(
-              self
-                .builder
-                .build_load(*ptr, "f128_load")
-                .into_float_value(),
-            ),
-            RuntimeType::Pointer => unreachable!(),
-          };
+          rhs = load_ptr!(ptr_type, ptr, self);
         }
         match (lhs, rhs) {
           (Value::I16(lhs), Value::I16(rhs)) => Ok(infix!(
@@ -383,7 +311,10 @@ impl<'a> Compiler<'a> {
         }
       }
       Expression::Unary { operator, argument } => {
-        let argument = self.compile_node(*argument)?.unwrap();
+        let mut argument = self.compile_node(*argument)?.unwrap();
+        if let Some((ptr, ptr_type)) = argument.as_pointer() {
+          argument = load_ptr!(ptr_type, ptr, self);
+        }
         match argument {
           Value::I16(int) => Ok(prefix!(self, operator, int, build_int_neg, I16)),
           Value::I32(int) => Ok(prefix!(self, operator, int, build_int_neg, I32)),
@@ -405,12 +336,10 @@ impl<'a> Compiler<'a> {
 
 #[cfg(test)]
 mod tests {
-  use std::f64::consts::PI;
-
   use inkwell::{context::Context, passes::PassManager};
   use parser::Parser;
 
-  use crate::{value::Value, Compiler};
+  use crate::{Compiler};
 
   fn check(code: &str, bytecode: &str) {
     let top_level = Parser::new(code).parse().unwrap();
@@ -420,9 +349,6 @@ mod tests {
     let fpm = PassManager::create(&module);
     fpm.initialize();
     let mut compiler = Compiler::new(&context, build, module, fpm);
-    compiler
-      .named_values
-      .insert("pi", Value::F64(context.f64_type().const_float(PI)));
     compiler.compile(top_level).unwrap();
     assert_eq!(
       compiler.module().print_to_string().to_string().as_str(),
@@ -437,13 +363,34 @@ source_filename = "tests"
   #[test]
   fn can_compile_unary_expression() {
     check(
-      "-2",
       r#"
-define void @main() {
+      function main() -> i32 {
+        return -2;
+      }
+      "#,
+      r#"
+define i32 @main() {
 main:
-  %tmp_alloca = alloca i32, align 4
-  store i32 -2, i32* %tmp_alloca, align 4
-  ret void
+  ret i32 -2
+}
+"#,
+    )
+  }
+  #[test]
+  fn can_compile_arguments_store_and_load() {
+    check(
+      r#"
+      function sum(a: i32) -> i32 {
+        return a;
+      }
+      "#,
+      r#"
+define i32 @sum(i32 %a) {
+sum:
+  %sum_ptr = alloca i32, align 4
+  store i32 %a, i32* %sum_ptr, align 4
+  %i32_load = load i32, i32* %sum_ptr, align 4
+  ret i32 %i32_load
 }
 "#,
     )
@@ -451,41 +398,15 @@ main:
   #[test]
   fn can_compile_infix_expression() {
     check(
-      "2 + 2",
       r#"
-define void @main() {
-main:
-  %tmp_alloca = alloca i32, align 4
-  store i32 4, i32* %tmp_alloca, align 4
-  ret void
-}
-"#,
-    )
-  }
-  #[test]
-  fn can_compile_constant() {
-    check(
-      "pi",
+      function main() -> i32 {
+        return 2 + 2;
+      }
+      "#,
       r#"
-define void @main() {
+define i32 @main() {
 main:
-  %tmp_alloca = alloca double, align 8
-  store double 0x400921FB54442D18, double* %tmp_alloca, align 8
-  ret void
-}
-"#,
-    )
-  }
-  #[test]
-  fn can_compile_int() {
-    check(
-      "1",
-      r#"
-define void @main() {
-main:
-  %tmp_alloca = alloca i32, align 4
-  store i32 1, i32* %tmp_alloca, align 4
-  ret void
+  ret i32 4
 }
 "#,
     )
@@ -493,13 +414,31 @@ main:
   #[test]
   fn can_compile_float() {
     check(
-      "1.2",
       r#"
-define void @main() {
+      function main() -> f64 {
+        return 2.3;
+      }
+      "#,
+      r#"
+define double @main() {
 main:
-  %tmp_alloca = alloca double, align 8
-  store double 1.200000e+00, double* %tmp_alloca, align 8
-  ret void
+  ret double 2.300000e+00
+}
+"#,
+    )
+  }
+  #[test]
+  fn can_compile_int() {
+    check(
+      r#"
+      function main() -> i32 {
+        return 1;
+      }
+      "#,
+      r#"
+define i32 @main() {
+main:
+  ret i32 1
 }
 "#,
     )
