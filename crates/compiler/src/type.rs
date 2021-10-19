@@ -16,7 +16,7 @@ impl<'a> From<Value<'a>> for BaseType {
   }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Type {
   I16,
   I32,
@@ -31,6 +31,24 @@ pub enum Type {
 
 impl<'a> From<&Value<'a>> for Type {
   fn from(value: &Value<'a>) -> Self {
+    match value {
+      Value::I16(_) => Self::I16,
+      Value::I32(_) => Self::I32,
+      Value::I64(_) => Self::I64,
+      Value::I128(_) => Self::I128,
+      Value::F16(_) => Self::F16,
+      Value::F32(_) => Self::F32,
+      Value::F64(_) => Self::F64,
+      Value::F128(_) => Self::F128,
+      Value::Pointer(..) => Self::Pointer,
+    }
+  }
+}
+
+
+
+impl<'a> From<Value<'a>> for Type {
+  fn from(value: Value<'a>) -> Self {
     match value {
       Value::I16(_) => Self::I16,
       Value::I32(_) => Self::I32,

@@ -43,7 +43,7 @@ pub enum TopLevelItem<'a> {
 }
 #[derive(Debug, PartialEq, EnumAsInner)]
 pub enum Node<'a> {
-  Identifier(&'a str),
+  Identifier(&'a str), // Used only in expressions
   Integer(&'a str),
   Float(&'a str),
   Expression(Expression<'a>),
@@ -62,6 +62,10 @@ pub enum Expression<'a> {
     operator: UnaryOperator,
     argument: Box<Node<'a>>,
   },
+  Call {
+    name: Box<Node<'a>>,
+    arguments: Vec<Node<'a>>
+  }
 }
 
 #[derive(Debug, PartialEq)]

@@ -193,7 +193,22 @@ impl<'a> Parser<'a> {
         });
         continue;
       }
-
+      if let Some((left_binding_power, ())) = Self::postfix_binding_power(&token.kind) {
+        if left_binding_power < minimal_binding_power {
+          break;
+        }
+        self.source.next_token()?;
+        let arguments = self.arguments(|parser| {
+          parser.parse_expression()
+        }, None)?;
+        self.source.consume(TokenKind::RightParentheses)?;
+        if lhs.as_identifier().is_some() {
+          lhs = Node::Expression(Expression::Call {
+            name: Box::new(lhs),
+            arguments
+          })
+        }
+      }
       break;
     }
     Ok(lhs)
@@ -207,7 +222,13 @@ impl<'a> Parser<'a> {
   }
   pub fn prefix_binding_power(operator: &TokenKind) -> Option<((), u8)> {
     match operator {
-      TokenKind::Plus | TokenKind::Minus => Some(((), 5)),
+      TokenKind::Minus => Some(((), 5)),
+      _ => None,
+    }
+  }
+  pub fn postfix_binding_power(operator: &TokenKind) -> Option<(u8, ())> {
+    match operator {
+      TokenKind::LeftParentheses => Some((5, ())),
       _ => None,
     }
   }

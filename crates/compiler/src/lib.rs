@@ -1,13 +1,15 @@
 #[macro_use]
 pub mod macros;
+pub mod function;
 pub mod r#type;
 pub mod value;
 
-use std::collections::HashMap;
+use std::{cmp::Ordering, collections::HashMap};
 
 use ast::{
   Argument, Expression, Node, Operator, Statement, TopLevel, TopLevelItem, Type, UnaryOperator,
 };
+use function::Function;
 use inkwell::{
   basic_block::BasicBlock,
   builder::Builder,
@@ -28,6 +30,7 @@ pub struct Compiler<'a> {
   fpm: PassManager<FunctionValue<'a>>,
   named_values: HashMap<&'a str, Value<'a>>,
   variables: HashMap<&'a str, Value<'a>>,
+  functions: HashMap<&'a str, Function<'a>>,
 }
 
 impl<'a> Compiler<'a> {
@@ -44,6 +47,7 @@ impl<'a> Compiler<'a> {
       fpm,
       variables: HashMap::new(),
       named_values: HashMap::new(),
+      functions: HashMap::new(),
     }
   }
   pub fn start_alloca(
@@ -95,12 +99,14 @@ impl<'a> Compiler<'a> {
     return_type: Type<'a>,
   ) -> Result<(), String> {
     let mut transformed_arguments = vec![];
+    let mut metadata_arguments = vec![];
     for argument in &arguments {
       let id = argument.argument_type.name;
+      metadata_arguments.push(RuntimeType::from(id));
       transformed_arguments.push(self.patch_type(id)?)
     }
-    let return_type = self.patch_type(return_type.name)?;
-    let fn_type = return_type.fn_type(transformed_arguments.as_slice(), false);
+    let base_type = self.patch_type(return_type.name)?;
+    let fn_type = base_type.fn_type(transformed_arguments.as_slice(), false);
     let fn_value = self.module.add_function(name, fn_type, None);
     let block = self.context.append_basic_block(fn_value, name);
     self.builder.position_at_end(block);
@@ -116,9 +122,10 @@ impl<'a> Compiler<'a> {
         fn_value,
       );
       self.builder.build_store(pointer, value);
-      self
-        .variables
-        .insert(argument.name, Value::Pointer(pointer, RuntimeType::from(type_name)));
+      self.variables.insert(
+        argument.name,
+        Value::Pointer(pointer, RuntimeType::from(type_name)),
+      );
     }
     match body {
       Node::Expression(expression) => {
@@ -139,6 +146,15 @@ impl<'a> Compiler<'a> {
     } else {
       return Err("Invalid function generated".to_string());
     }
+    self.functions.insert(
+      name,
+      Function {
+        name,
+        type_arguments: metadata_arguments,
+        return_type: RuntimeType::from(return_type.name),
+      },
+    );
+    self.variables.clear();
     Ok(())
   }
 
@@ -317,6 +333,62 @@ impl<'a> Compiler<'a> {
           _ => Err("Value can't be used in unary expressions".to_string()),
         }
       }
+      Expression::Call { name, arguments } => {
+        let name = (*name)
+          .as_identifier()
+          .ok_or("Function name not identifier")?;
+        let function = self
+          .module
+          .get_function(name)
+          .ok_or(format!("Unknown function {}", name))?;
+
+        match arguments.len().cmp(&(function.count_params() as usize)) {
+          Ordering::Less => Err("Don't enough arguments".to_string()),
+          Ordering::Greater => Err("Too much arguments".to_string()),
+          Ordering::Equal => {
+            let mut functions = self.functions.clone(); // REMOVE CLONE HERE
+            let function_metadata = functions
+            .get_mut(name)
+            .ok_or(format!("Can't find function metadata for {}", name))?;
+            let mut value_arguments = Vec::with_capacity(arguments.len());
+            for argument in arguments {
+              value_arguments.push(
+                self
+                  .compile_node(argument)?
+                  .ok_or("Node compilation returned None")?,
+              );
+            }
+            let mut compiled_arguments = vec![];
+            for (index, value) in value_arguments.iter().enumerate() {
+              let value_type = RuntimeType::from(value);
+              let expected_type = function_metadata.type_arguments[index];
+              if value_type != expected_type {
+                return Err(format!("Expected {:?} type, found {:?}", expected_type, value))
+              }
+
+              compiled_arguments.push(BasicValueEnum::from(value));
+            }
+            let call_site = self.builder.build_call(
+              function,
+              compiled_arguments.as_slice(),
+              format!("{}_call", name).as_str(),
+            );
+            let value = call_site.try_as_basic_value().left().ok_or("Void don't supported")?;
+            match function_metadata.return_type {
+                RuntimeType::I16 => Ok(Value::I16(value.into_int_value())),
+                RuntimeType::I32 => Ok(Value::I32(value.into_int_value())),
+                RuntimeType::I64 => Ok(Value::I64(value.into_int_value())),
+                RuntimeType::I128 => Ok(Value::I128(value.into_int_value())),
+                RuntimeType::F16 => Ok(Value::F16(value.into_float_value())),
+                RuntimeType::F32 => Ok(Value::F32(value.into_float_value())),
+                RuntimeType::F64 => Ok(Value::F64(value.into_float_value())),
+                RuntimeType::F128 => Ok(Value::F128(value.into_float_value())),
+                RuntimeType::Pointer => Ok(Value::Pointer(value.into_pointer_value(), function_metadata.return_type)),
+            }
+          }
+        }
+      }
+      
     }
   }
   pub fn module(&self) -> &Module<'a> {
@@ -329,7 +401,7 @@ mod tests {
   use inkwell::{context::Context, passes::PassManager};
   use parser::Parser;
 
-  use crate::{Compiler};
+  use crate::Compiler;
 
   fn check(code: &str, bytecode: &str) {
     let top_level = Parser::new(code).parse().unwrap();
