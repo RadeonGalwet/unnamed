@@ -1,15 +1,15 @@
 #[macro_use]
 pub mod macros;
-pub mod function;
+pub mod function_signature;
 pub mod r#type;
 pub mod value;
 
 use std::{cmp::Ordering, collections::HashMap};
 
 use ast::{
-  Argument, Expression, Node, Operator, Statement, TopLevel, TopLevelItem, Type, UnaryOperator,
+  Argument, Expression, Node, Operator, Statement, TopLevel, Type, UnaryOperator,
 };
-use function::Function;
+use function_signature::FunctionSignature;
 use inkwell::{
   basic_block::BasicBlock,
   builder::Builder,
@@ -30,7 +30,7 @@ pub struct Compiler<'a> {
   fpm: PassManager<FunctionValue<'a>>,
   named_values: HashMap<&'a str, Value<'a>>,
   variables: HashMap<&'a str, Value<'a>>,
-  functions: HashMap<&'a str, Function<'a>>,
+  functions: HashMap<&'a str, FunctionSignature<'a>>,
 }
 
 impl<'a> Compiler<'a> {
@@ -72,61 +72,57 @@ impl<'a> Compiler<'a> {
     Ok(())
   }
   pub fn compile_top_level(&mut self, top_level: TopLevel<'a>) -> Result<(), String> {
-    match top_level {
-      TopLevel::Items(items) => {
-        for item in items {
-          self.compile_top_level_item(item)?;
-        }
-      }
-    };
+    let mut signatures = vec![];
+    for function in top_level.functions {
+      let signature = self.compile_function_signature(function.name, function.arguments, function.return_type)?;
+      let value = self.load_signature(&signature)?;
+      signatures.push((function.name, value, function.body, signature));
+    }
+    for signature in signatures {
+      self.compile_function(signature.0, signature.1, *(signature.2), signature.3)?;
+    }
     Ok(())
   }
-  pub fn compile_top_level_item(&mut self, item: TopLevelItem<'a>) -> Result<(), String> {
-    match item {
-      TopLevelItem::Function {
-        name,
-        arguments,
-        body,
-        return_type,
-      } => self.compile_function(name, arguments, *body, return_type),
+  pub fn compile_function_signature(&mut self, name: &'a str, ast_arguments: Vec<Argument<'a>>, return_type: Type) -> Result<FunctionSignature<'a>, String> { 
+    let return_type = RuntimeType::from(return_type.name);
+    let mut arguments = vec![];
+    for argument in ast_arguments {
+      arguments.push((RuntimeType::from(argument.argument_type.name), argument.name))
     }
+    let signature = FunctionSignature {
+      name,
+      arguments,
+      return_type,
+    };
+    self.functions.insert(name, signature.clone()); // I don't have any ideas how to remove clone here
+    Ok(signature)
+  }
+  pub fn load_signature(&mut self, signature: &FunctionSignature<'a>) -> Result<FunctionValue<'a>, String> {
+    let mut patched_arguments = vec![];
+    for argument in &signature.arguments {
+      patched_arguments.push(self.patch_type(argument.0.to_string().as_str())?)
+    }
+    let return_type = self.patch_type(signature.return_type.to_string().as_str())?;
+    let fn_type = return_type.fn_type(patched_arguments.as_slice(), false);
+    Ok(self.module.add_function(signature.name, fn_type, None))
   }
   pub fn compile_function(
     &mut self,
     name: &'a str,
-    arguments: Vec<Argument<'a>>,
+    fn_value: FunctionValue<'a>,
     body: Node<'a>,
-    return_type: Type<'a>,
+    signature: FunctionSignature<'a>
   ) -> Result<(), String> {
-    let mut transformed_arguments = vec![];
-    let mut metadata_arguments = vec![];
-    for argument in &arguments {
-      let id = argument.argument_type.name;
-      metadata_arguments.push(RuntimeType::from(id));
-      transformed_arguments.push(self.patch_type(id)?)
-    }
-    let base_type = self.patch_type(return_type.name)?;
-    let fn_type = base_type.fn_type(transformed_arguments.as_slice(), false);
-    let fn_value = self.module.add_function(name, fn_type, None);
     let block = self.context.append_basic_block(fn_value, name);
     self.builder.position_at_end(block);
     for (index, value) in fn_value.get_param_iter().enumerate() {
-      let argument = &arguments[index];
-      value.set_name(argument.name);
-      let argument_type = transformed_arguments[index];
-      let type_name = argument.argument_type.name;
-      let pointer = self.start_alloca(
-        block,
-        argument_type,
-        format!("{}_ptr", name).as_str(),
-        fn_value,
-      );
+      let compile_time_argument = signature.arguments[index];
+      let pointer = self.start_alloca(block, value.get_type(), format!("load_{}_ptr", index).as_str(), fn_value);
       self.builder.build_store(pointer, value);
-      self.variables.insert(
-        argument.name,
-        Value::Pointer(pointer, RuntimeType::from(type_name)),
-      );
+      value.set_name(compile_time_argument.1);
+      self.variables.insert(compile_time_argument.1, Value::Pointer(pointer, compile_time_argument.0));
     }
+    self.functions.insert(name, signature);
     match body {
       Node::Expression(expression) => {
         let value = self.compile_expression(expression)?;
@@ -141,19 +137,12 @@ impl<'a> Compiler<'a> {
       }
       _ => unreachable!(),
     };
+
     if fn_value.verify(true) {
       self.fpm.run_on(&fn_value);
     } else {
       return Err("Invalid function generated".to_string());
     }
-    self.functions.insert(
-      name,
-      Function {
-        name,
-        type_arguments: metadata_arguments,
-        return_type: RuntimeType::from(return_type.name),
-      },
-    );
     self.variables.clear();
     Ok(())
   }
@@ -361,8 +350,8 @@ impl<'a> Compiler<'a> {
             let mut compiled_arguments = vec![];
             for (index, value) in value_arguments.iter().enumerate() {
               let value_type = RuntimeType::from(value);
-              let expected_type = function_metadata.type_arguments[index];
-              if value_type != expected_type {
+              let expected_type = function_metadata.arguments[index];
+              if value_type != expected_type.0 {
                 return Err(format!("Expected {:?} type, found {:?}", expected_type, value))
               }
 

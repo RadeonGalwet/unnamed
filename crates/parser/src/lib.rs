@@ -1,5 +1,5 @@
 
-use ast::{Argument, Expression, Node, Operator, Statement, TopLevel, TopLevelItem, Type, UnaryOperator};
+use ast::{Argument, Expression, Function, Node, Operator, Statement, TopLevel, Type, UnaryOperator};
 use lexer::TokenKind;
 use source::Source;
 use state::State;
@@ -46,7 +46,7 @@ impl<'a> Parser<'a> {
     Ok(args)
   }
   pub fn parse_top_level(&mut self) -> Result<TopLevel<'a>, String> {
-    let mut items = vec![];
+    let mut functions = vec![];
     while self.source.peek().is_ok() {
       let token = self.source.next_token()?;
       match token.kind {
@@ -85,7 +85,7 @@ impl<'a> Parser<'a> {
           } else {
             self.parse_block()?
           };
-          items.push(TopLevelItem::Function {
+          functions.push(Function {
             name: identifier,
             arguments,
             return_type,
@@ -96,7 +96,9 @@ impl<'a> Parser<'a> {
       };
     }
 
-    Ok(TopLevel::Items(items))
+    Ok(TopLevel {
+      functions
+    })
   }
   pub fn statement(&mut self) -> Result<Node<'a>, String> {
     let token = self.source.peek()?;
@@ -236,7 +238,7 @@ impl<'a> Parser<'a> {
 
 #[cfg(test)]
 mod tests {
-  use ast::{Argument, Expression, Node, Operator, Statement, TopLevel, TopLevelItem, Type, UnaryOperator};
+  use ast::{Argument, Expression, Function, Node, Operator, Statement, TopLevel, Type, UnaryOperator};
 
   use crate::Parser;
 
@@ -246,16 +248,19 @@ mod tests {
   }
   #[test]
   fn can_parse_function() {
-    check("function main() {}", TopLevel::Items(vec![TopLevelItem::Function {
+    let function = Function {
       name: "main",
       arguments: vec![],
       body: Box::new(Node::Block(vec![])),
       return_type: Type {name: "void"}
-    }]));
+    };
+    check("function main() {}", TopLevel {
+      functions: vec![function]
+    })
   }
   #[test]
   fn can_parse_inline_function() {
-    check("function main() = 2 + 2;", TopLevel::Items(vec![TopLevelItem::Function {
+    let function = Function {
       name: "main",
       arguments: vec![],
       body: Box::new(Node::Expression(Expression::Binary {
@@ -264,11 +269,14 @@ mod tests {
         operator: Operator::Plus
       })),
       return_type: Type {name: "void"}
-    }]));
+    };
+    check("function main() = 2 + 2;", TopLevel {
+      functions: vec![function]
+    });
   }
   #[test]
   fn can_parse_function_with_arguments() {
-    check("function main(a: i32) {}", TopLevel::Items(vec![TopLevelItem::Function {
+    let function = Function {
       name: "main",
       arguments: vec![Argument {
         name: "a",
@@ -278,11 +286,12 @@ mod tests {
       }],
       body: Box::new(Node::Block(vec![])),
       return_type: Type {name: "void"}
-    }]));
+    };
+    check("function main(a: i32) {}", TopLevel { functions: vec![function] });
   }
   #[test]
   fn can_parse_function_with_multiple_arguments() {
-    check("function main(a: i32, b: i32) {}", TopLevel::Items(vec![TopLevelItem::Function {
+    let function = Function {
       name: "main",
       arguments: vec![Argument {
         name: "a",
@@ -297,13 +306,14 @@ mod tests {
       }],
       body: Box::new(Node::Block(vec![])),
       return_type: Type {name: "void"}
-    }]));
+    };
+    check("function main(a: i32, b: i32) {}", TopLevel {
+      functions: vec![function]
+    });
   }
   #[test]
   fn can_parse_binary_expression() {
-    check("function main() {
-      1 + 2;
-    }", TopLevel::Items(vec![TopLevelItem::Function {
+    let function = Function {
       name: "main",
       arguments: vec![],
       body: Box::new(Node::Block(vec![
@@ -314,13 +324,16 @@ mod tests {
         })
       ])),
       return_type: Type {name: "void"}
-    }]));
+    };
+    check("function main() {
+      1 + 2;
+    }", TopLevel {
+      functions: vec![function]
+    });
   }
   #[test]
   fn can_parse_float() {
-    check("function main() {
-      1.1 + 2.2;
-    }", TopLevel::Items(vec![TopLevelItem::Function {
+    let function = Function {
       name: "main",
       arguments: vec![],
       body: Box::new(Node::Block(vec![
@@ -331,13 +344,16 @@ mod tests {
         })
       ])),
       return_type: Type {name: "void"}
-    }]));
+    };
+    check("function main() {
+      1.1 + 2.2;
+    }", TopLevel {
+      functions: vec![function]
+    });
   }
   #[test]
   fn can_parse_group() {
-    check("function main() {
-      (1.1 + 2.2);
-    }", TopLevel::Items(vec![TopLevelItem::Function {
+    let function = Function {
       name: "main",
       arguments: vec![],
       body: Box::new(Node::Block(vec![
@@ -348,13 +364,16 @@ mod tests {
         })
       ])),
       return_type: Type {name: "void"}
-    }]));
+    };
+    check("function main() {
+      (1.1 + 2.2);
+    }", TopLevel {
+      functions: vec![function]
+    });
   }
   #[test]
   fn can_parse_unary_expression() {
-    check("function main() {
-      -1;
-    }", TopLevel::Items(vec![TopLevelItem::Function {
+    let function = Function {
       name: "main",
       arguments: vec![],
       body: Box::new(Node::Block(vec![
@@ -364,13 +383,16 @@ mod tests {
         })
       ])),
       return_type: Type {name: "void"}
-    }]));
+    };
+    check("function main() {
+      -1;
+    }", TopLevel {
+      functions: vec![function]
+    });
   }
   #[test]
   fn can_parse_unary_expression_with_float() {
-    check("function main() {
-      -1.1;
-    }", TopLevel::Items(vec![TopLevelItem::Function {
+    let function = Function {
       name: "main",
       arguments: vec![],
       body: Box::new(Node::Block(vec![
@@ -380,19 +402,25 @@ mod tests {
         })
       ])),
       return_type: Type {name: "void"}
-    }]));
+    };
+    check("function main() {
+      -1.1;
+    }", TopLevel {
+      functions: vec![function]
+    });
   }
   #[test]
   fn can_parse_return() {
-    check("function main() {
-      return 1.1;
-    }", TopLevel::Items(vec![TopLevelItem::Function {
+    let function = Function {
       name: "main",
       arguments: vec![],
       body: Box::new(Node::Block(vec![
         Node::Statement(Statement::Return(Some(Box::new(Node::Float("1.1")))))
       ])),
       return_type: Type {name: "void"}
-    }]));
+    };
+    check("function main() {
+      return 1.1;
+    }", TopLevel { functions: vec![function] });
   }
 }

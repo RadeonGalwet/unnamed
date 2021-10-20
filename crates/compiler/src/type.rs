@@ -45,8 +45,6 @@ impl<'a> From<&Value<'a>> for Type {
   }
 }
 
-
-
 impl<'a> From<Value<'a>> for Type {
   fn from(value: Value<'a>) -> Self {
     match value {
@@ -76,5 +74,21 @@ impl From<&str> for Type {
       "f128" => Self::F128,
       _ => unreachable!(),
     }
+  }
+}
+
+impl ToString for Type {
+  fn to_string(&self) -> String {
+    match self {
+      Type::I16 => "i16",
+      Type::I32 => "i32",
+      Type::I64 => "i64",
+      Type::I128 => "i128",
+      Type::F16 => "f16",
+      Type::F32 => "f32",
+      Type::F64 => "f64",
+      Type::F128 => "f128",
+      Type::Pointer => "ptr",
+    }.to_string()
   }
 }

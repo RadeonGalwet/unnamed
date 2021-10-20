@@ -29,17 +29,8 @@ pub enum UnaryOperator {
   Minus,
 }
 #[derive(Debug, PartialEq)]
-pub enum TopLevel<'a> {
-  Items(Vec<TopLevelItem<'a>>),
-}
-#[derive(Debug, PartialEq)]
-pub enum TopLevelItem<'a> {
-  Function {
-    name: &'a str,
-    arguments: Vec<Argument<'a>>,
-    body: Box<Node<'a>>,
-    return_type: Type<'a>,
-  },
+pub struct TopLevel<'a> {
+  pub functions: Vec<Function<'a>>,
 }
 #[derive(Debug, PartialEq, EnumAsInner)]
 pub enum Node<'a> {
