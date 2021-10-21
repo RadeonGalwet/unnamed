@@ -62,6 +62,24 @@ pub enum TokenKind {
   Multiply,
   #[token("/")]
   Divide,
+  #[token("==")]
+  Equal,
+  #[token("!=")]
+  NotEqual,
+  #[token(">")]
+  Greater,
+  #[token(">=")]
+  GreaterEqual,
+  #[token("<")]
+  Less,
+  #[token("<=")]
+  LessEqual,
+  #[token("||")]
+  Or,
+  #[token("&&")]
+  And,
+  #[token("!")]
+  Negate,
   #[token("=")]
   Assignment,
 
@@ -86,6 +104,10 @@ pub enum TokenKind {
   Function,
   #[token("return")]
   Return,
+  #[token("true")]
+  True,
+  #[token("false")]
+  False
 }
 
 #[cfg(test)]
@@ -127,6 +149,38 @@ mod tests {
   #[test]
   fn can_parse_assignment() {
     check("=", TokenKind::Assignment)
+  }
+  #[test]
+  fn can_parse_equal() {
+    check("==", TokenKind::Equal)
+  }
+  #[test]
+  fn can_parse_not_equal() {
+    check("!=", TokenKind::NotEqual)
+  }
+  #[test]
+  fn can_parse_less() {
+    check("<", TokenKind::Less)
+  }
+  #[test]
+  fn can_parse_less_equal() {
+    check("<=", TokenKind::LessEqual)
+  }
+  #[test]
+  fn can_parse_greeter() {
+    check(">", TokenKind::Greater)
+  }
+  #[test]
+  fn can_parse_greeter_equal() {
+    check(">=", TokenKind::GreaterEqual)
+  }
+  #[test]
+  fn can_parse_and() {
+    check("&&", TokenKind::And)
+  }
+  #[test]
+  fn can_parse_or() {
+    check("||", TokenKind::Or)
   }
   #[test]
   fn can_parse_left_parentheses() {

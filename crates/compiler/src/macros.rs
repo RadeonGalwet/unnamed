@@ -6,6 +6,7 @@ macro_rules! infix {
       Operator::Minus => Value::$target($self.builder.$sub($lhs, $rhs, "tmp_sub")),
       Operator::Multiply => Value::$target($self.builder.$mul($lhs, $rhs, "tmp_mul")),
       Operator::Divide => Value::$target($self.builder.$div($lhs, $rhs, "tmp_div")),
+      _ => todo!()
     }
   };
 }

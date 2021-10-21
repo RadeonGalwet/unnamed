@@ -159,6 +159,9 @@ impl<'a> Parser<'a> {
           argument: Box::new(expr),
         })
       }
+      TokenKind::True => Node::Boolean(true),
+      TokenKind::False => Node::Boolean(false),
+
       TokenKind::LeftParentheses => {
         let expression = self.parse_expression_with_binding_power(0)?;
         self.source.consume(TokenKind::RightParentheses)?;
@@ -184,6 +187,14 @@ impl<'a> Parser<'a> {
           TokenKind::Minus => Operator::Minus,
           TokenKind::Multiply => Operator::Multiply,
           TokenKind::Divide => Operator::Divide,
+          TokenKind::Equal => Operator::Equal,
+          TokenKind::NotEqual => Operator::NotEqual,
+          TokenKind::Less => Operator::Less,
+          TokenKind::LessEqual => Operator::LessEqual,
+          TokenKind::Greater => Operator::Greater,
+          TokenKind::GreaterEqual => Operator::GreaterEqual,
+          TokenKind::And => Operator::And,
+          TokenKind::Or => Operator::Or,
           _ => break,
         };
         self.source.next_token()?;
@@ -217,14 +228,18 @@ impl<'a> Parser<'a> {
   }
   pub fn infix_binding_power(operator: &TokenKind) -> Option<(u8, u8)> {
     match operator {
-      TokenKind::Plus | TokenKind::Minus => Some((1, 2)),
-      TokenKind::Multiply | TokenKind::Divide => Some((2, 3)),
+      TokenKind::Less | TokenKind::LessEqual | TokenKind::Greater | TokenKind::GreaterEqual => Some((1, 2)),
+      TokenKind::And => Some((2, 3)),
+      TokenKind::Or => Some((3, 4)),
+      TokenKind::Equal | TokenKind::NotEqual => Some((4, 5)),
+      TokenKind::Plus | TokenKind::Minus => Some((5, 6)),
+      TokenKind::Multiply | TokenKind::Divide => Some((7, 8)),
       _ => None,
     }
   }
   pub fn prefix_binding_power(operator: &TokenKind) -> Option<((), u8)> {
     match operator {
-      TokenKind::Minus => Some(((), 5)),
+      TokenKind::Minus => Some(((), 7)),
       _ => None,
     }
   }
@@ -332,6 +347,26 @@ mod tests {
     });
   }
   #[test]
+  fn can_parse_binary_expression_with_logical() {
+    let function = Function {
+      name: "main",
+      arguments: vec![],
+      body: Box::new(Node::Block(vec![
+        Node::Expression(Expression::Binary {
+          lhs: Box::new(Node::Integer("1")),
+          rhs: Box::new(Node::Integer("2")),
+          operator: Operator::Equal
+        })
+      ])),
+      return_type: Type {name: "void"}
+    };
+    check("function main() {
+      1 == 2;
+    }", TopLevel {
+      functions: vec![function]
+    });
+  }
+  #[test]
   fn can_parse_float() {
     let function = Function {
       name: "main",
@@ -347,6 +382,26 @@ mod tests {
     };
     check("function main() {
       1.1 + 2.2;
+    }", TopLevel {
+      functions: vec![function]
+    });
+  }
+  #[test]
+  fn can_parse_boolean() {
+    let function = Function {
+      name: "main",
+      arguments: vec![],
+      body: Box::new(Node::Block(vec![
+        Node::Expression(Expression::Binary {
+          lhs: Box::new(Node::Boolean(true)),
+          rhs: Box::new(Node::Boolean(false)),
+          operator: Operator::And
+        })
+      ])),
+      return_type: Type {name: "void"}
+    };
+    check("function main() {
+      true && false;
     }", TopLevel {
       functions: vec![function]
     });

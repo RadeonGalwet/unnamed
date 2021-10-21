@@ -194,6 +194,7 @@ impl<'a> Compiler<'a> {
         Ok(None)
       }
       Node::Block(_) => unreachable!(),
+        Node::Boolean(_) => todo!(),
     }
   }
   pub fn compile_statement(&mut self, statement: Statement<'a>) -> Result<(), String> {

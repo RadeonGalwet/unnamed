@@ -22,6 +22,14 @@ pub enum Operator {
   Minus,
   Multiply,
   Divide,
+  Equal,
+  NotEqual,
+  Less,
+  LessEqual,
+  Greater,
+  GreaterEqual,
+  And,
+  Or
 }
 
 #[derive(Debug, PartialEq)]
@@ -35,6 +43,7 @@ pub struct TopLevel<'a> {
 #[derive(Debug, PartialEq, EnumAsInner)]
 pub enum Node<'a> {
   Identifier(&'a str), // Used only in expressions
+  Boolean(bool),
   Integer(&'a str),
   Float(&'a str),
   Expression(Expression<'a>),
