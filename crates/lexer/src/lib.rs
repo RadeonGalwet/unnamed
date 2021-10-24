@@ -104,10 +104,14 @@ pub enum TokenKind {
   Function,
   #[token("return")]
   Return,
+  #[token("if")]
+  If,
+  #[token("else")]
+  Else,
   #[token("true")]
   True,
   #[token("false")]
-  False
+  False,
 }
 
 #[cfg(test)]

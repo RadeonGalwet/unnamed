@@ -1,19 +1,17 @@
-
-
 macro_rules! load_ptr {
   ($type: ident, $value: ident, $self: ident) => {
     match $type {
       RuntimeType::Boolean => Value::Boolean(
         $self
-        .builder
-        .build_load(*$value, "i1_load")
-        .into_int_value(),
+          .builder
+          .build_load(*$value, "i1_load")
+          .into_int_value(),
       ),
       RuntimeType::I8 => Value::I8(
         $self
-        .builder
-        .build_load(*$value, "i8_load")
-        .into_int_value(),
+          .builder
+          .build_load(*$value, "i8_load")
+          .into_int_value(),
       ),
       RuntimeType::I16 => Value::I16(
         $self

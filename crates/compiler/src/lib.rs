@@ -1,12 +1,15 @@
 #[macro_use]
 pub mod macros;
+pub mod env;
 pub mod function_signature;
+pub mod state;
 pub mod r#type;
 pub mod value;
 
-use std::{cmp::Ordering, collections::HashMap};
+use std::{cell::RefCell, cmp::Ordering, collections::HashMap, rc::Rc};
 
 use ast::{Argument, Expression, Node, Operator, Statement, TopLevel, Type, UnaryOperator};
+use env::Environment;
 use function_signature::FunctionSignature;
 use inkwell::{
   basic_block::BasicBlock,
@@ -18,6 +21,7 @@ use inkwell::{
   values::{BasicValue, BasicValueEnum, FunctionValue, PointerValue},
   FloatPredicate, IntPredicate,
 };
+use state::State;
 use value::Value;
 
 use crate::r#type::Type as RuntimeType;
@@ -28,8 +32,11 @@ pub struct Compiler<'a> {
   module: Module<'a>,
   fpm: PassManager<FunctionValue<'a>>,
   named_values: HashMap<&'a str, Value<'a>>,
-  variables: HashMap<&'a str, Value<'a>>,
+  environment: Rc<RefCell<Environment<'a, Value<'a>>>>,
+  function: Option<FunctionValue<'a>>,
+  block: Option<BasicBlock<'a>>,
   functions: HashMap<&'a str, FunctionSignature<'a>>,
+  state: State,
 }
 
 impl<'a> Compiler<'a> {
@@ -44,10 +51,19 @@ impl<'a> Compiler<'a> {
       builder,
       module,
       fpm,
-      variables: HashMap::new(),
+      state: State::default(),
+      environment: Rc::new(RefCell::new(Environment::new(None))),
       named_values: HashMap::new(),
       functions: HashMap::new(),
+      function: None,
+      block: None,
     }
+  }
+  pub fn update_state(&mut self, state: State) {
+    self.state = state;
+  }
+  pub fn reset_state(&mut self) {
+    self.state = State::None;
   }
   pub fn start_alloca(
     &mut self,
@@ -136,11 +152,13 @@ impl<'a> Compiler<'a> {
       );
       self.builder.build_store(pointer, value);
       value.set_name(compile_time_argument.1);
-      self.variables.insert(
+      self.environment.borrow_mut().set(
         compile_time_argument.1,
         Value::Pointer(pointer, compile_time_argument.0),
       );
     }
+    self.function = Some(fn_value);
+    self.block = Some(block);
     self.functions.insert(name, signature);
     match body {
       Node::Expression(expression) => {
@@ -162,14 +180,14 @@ impl<'a> Compiler<'a> {
     } else {
       return Err("Invalid function generated".to_string());
     }
-    self.variables.clear();
+    self.environment.borrow_mut().clear();
     Ok(())
   }
 
   pub fn patch_type(&self, string: &str) -> Result<BasicTypeEnum<'a>, String> {
     match string {
-      "boolean" => Ok(BasicTypeEnum::IntType(self.context.bool_type())), 
-      "i8" => Ok(BasicTypeEnum::IntType(self.context.i8_type())), 
+      "boolean" => Ok(BasicTypeEnum::IntType(self.context.bool_type())),
+      "i8" => Ok(BasicTypeEnum::IntType(self.context.i8_type())),
       "i16" => Ok(BasicTypeEnum::IntType(self.context.i16_type())),
       "i32" => Ok(BasicTypeEnum::IntType(self.context.i32_type())),
       "i64" => Ok(BasicTypeEnum::IntType(self.context.i64_type())),
@@ -185,7 +203,7 @@ impl<'a> Compiler<'a> {
   pub fn compile_node(&mut self, node: Node<'a>) -> Result<Option<Value<'a>>, String> {
     match node {
       Node::Identifier(id) => {
-        let mut value = if let Some(value) = self.variables.get(id) {
+        let mut value = if let Ok(value) = self.environment.borrow_mut().get(id) {
           *value
         } else {
           let value = self
@@ -214,13 +232,24 @@ impl<'a> Compiler<'a> {
         self.compile_statement(statement)?;
         Ok(None)
       }
-      Node::Block(_) => unreachable!(),
-      Node::Boolean(boolean) => Ok(Some(Value::Boolean(self.context.bool_type().const_int(boolean as u64, false)))),
+      Node::Block(body) => {
+        let old_env = Rc::clone(&self.environment);
+        self.environment = Rc::new(RefCell::new(Environment::new(Some(Rc::clone(&old_env)))));
+        for node in body {
+          self.compile_node(node)?;
+        }
+        self.environment = old_env;
+        Ok(None)
+      }
+      Node::Boolean(boolean) => Ok(Some(Value::Boolean(
+        self.context.bool_type().const_int(boolean as u64, false),
+      ))),
     }
   }
   pub fn compile_statement(&mut self, statement: Statement<'a>) -> Result<(), String> {
     match statement {
       Statement::Return(value) => {
+        self.update_state(State::Return);
         if let Some(value) = value {
           let value = self.compile_node(*value)?.unwrap();
           self
@@ -228,7 +257,46 @@ impl<'a> Compiler<'a> {
             .build_return(Some(&BasicValueEnum::from(value)))
         } else {
           self.builder.build_return(None)
+        };
+      }
+      Statement::Conditional {
+        then_branch,
+        expression,
+        else_branch,
+      } => {
+        let comparison = *(self
+          .compile_node(*expression)?
+          .ok_or("Not expression")?
+          .as_boolean()
+          .ok_or("Not boolean")?);
+        let then_block = self
+          .context
+          .append_basic_block(self.function.unwrap(), "then");
+        let else_block = self
+          .context
+          .append_basic_block(self.function.unwrap(), "else");
+        let continue_block = self
+          .context
+          .append_basic_block(self.function.unwrap(), "continue");
+        self
+          .builder
+          .build_conditional_branch(comparison, then_block, else_block);
+        self.builder.position_at_end(then_block);
+
+        self.compile_node(*then_branch)?;
+        if !(self.state == State::Return) {
+          self.builder.build_unconditional_branch(continue_block);
         }
+        self.reset_state();
+        self.builder.position_at_end(else_block);
+        if let Some(else_branch) = else_branch {
+          self.compile_node(*else_branch)?;
+        }
+        if !(self.state == State::Return) {
+          self.builder.build_unconditional_branch(continue_block);
+        }
+        self.reset_state();
+        self.builder.position_at_end(continue_block);
       }
     };
     Ok(())

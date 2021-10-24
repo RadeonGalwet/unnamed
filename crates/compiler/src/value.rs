@@ -21,9 +21,12 @@ pub enum Value<'a> {
 impl<'a> From<&Value<'a>> for BasicValueEnum<'a> {
   fn from(value: &Value<'a>) -> Self {
     match value {
-      Value::Boolean(int) | Value::I8(int) | Value::I16(int) | Value::I32(int) | Value::I64(int) | Value::I128(int) => {
-        BasicValueEnum::IntValue(*int)
-      }
+      Value::Boolean(int)
+      | Value::I8(int)
+      | Value::I16(int)
+      | Value::I32(int)
+      | Value::I64(int)
+      | Value::I128(int) => BasicValueEnum::IntValue(*int),
       Value::F16(float) | Value::F32(float) | Value::F64(float) | Value::F128(float) => {
         BasicValueEnum::FloatValue(*float)
       }
@@ -35,9 +38,12 @@ impl<'a> From<&Value<'a>> for BasicValueEnum<'a> {
 impl<'a> From<Value<'a>> for BasicValueEnum<'a> {
   fn from(value: Value<'a>) -> Self {
     match value {
-      Value::Boolean(int) | Value::I8(int) | Value::I16(int) | Value::I32(int) | Value::I64(int) | Value::I128(int) => {
-        BasicValueEnum::IntValue(int)
-      }
+      Value::Boolean(int)
+      | Value::I8(int)
+      | Value::I16(int)
+      | Value::I32(int)
+      | Value::I64(int)
+      | Value::I128(int) => BasicValueEnum::IntValue(int),
       Value::F16(float) | Value::F32(float) | Value::F64(float) | Value::F128(float) => {
         BasicValueEnum::FloatValue(float)
       }

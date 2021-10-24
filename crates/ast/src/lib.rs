@@ -29,7 +29,7 @@ pub enum Operator {
   Greater,
   GreaterEqual,
   And,
-  Or
+  Or,
 }
 
 #[derive(Debug, PartialEq)]
@@ -64,11 +64,16 @@ pub enum Expression<'a> {
   },
   Call {
     name: Box<Node<'a>>,
-    arguments: Vec<Node<'a>>
-  }
+    arguments: Vec<Node<'a>>,
+  },
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Statement<'a> {
   Return(Option<Box<Node<'a>>>),
+  Conditional {
+    then_branch: Box<Node<'a>>,
+    expression: Box<Node<'a>>,
+    else_branch: Option<Box<Node<'a>>>,
+  },
 }

@@ -6,11 +6,15 @@ enum BaseType {
   Pointer,
 }
 
-
 impl<'a> From<Value<'a>> for BaseType {
   fn from(value: Value<'a>) -> Self {
     match value {
-      Value::Boolean(_) | Value::I8(_) | Value::I16(_) | Value::I32(_) | Value::I64(_) | Value::I128(_) => Self::Integer,
+      Value::Boolean(_)
+      | Value::I8(_)
+      | Value::I16(_)
+      | Value::I32(_)
+      | Value::I64(_)
+      | Value::I128(_) => Self::Integer,
       Value::F16(_) | Value::F32(_) | Value::F64(_) | Value::F128(_) => Self::Float,
       Value::Pointer(..) => Self::Pointer,
     }
@@ -46,7 +50,6 @@ impl<'a> From<&Value<'a>> for Type {
       Value::F64(_) => Self::F64,
       Value::F128(_) => Self::F128,
       Value::Pointer(..) => Self::Pointer,
-
     }
   }
 }
@@ -101,7 +104,7 @@ impl ToString for Type {
       Type::F64 => "f64",
       Type::F128 => "f128",
       Type::Pointer => "ptr",
-
-    }.to_string()
+    }
+    .to_string()
   }
 }

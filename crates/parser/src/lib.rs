@@ -1,5 +1,6 @@
-
-use ast::{Argument, Expression, Function, Node, Operator, Statement, TopLevel, Type, UnaryOperator};
+use ast::{
+  Argument, Expression, Function, Node, Operator, Statement, TopLevel, Type, UnaryOperator,
+};
 use lexer::TokenKind;
 use source::Source;
 use state::State;
@@ -61,9 +62,7 @@ impl<'a> Parser<'a> {
               let type_name = parser.source.consume(TokenKind::Identifier)?.value;
               Ok(Argument {
                 name: id,
-                argument_type: Type {
-                  name: type_name,
-                },
+                argument_type: Type { name: type_name },
               })
             },
             Some(TokenKind::Identifier),
@@ -71,12 +70,10 @@ impl<'a> Parser<'a> {
           self.source.consume(TokenKind::RightParentheses)?;
           let return_type = if self.source.test_and_next(TokenKind::Arrow)? {
             Type {
-              name: self.source.consume(TokenKind::Identifier)?.value
+              name: self.source.consume(TokenKind::Identifier)?.value,
             }
           } else {
-            Type {
-              name: "void",
-            }
+            Type { name: "void" }
           };
           let body = if self.source.test_and_next(TokenKind::Assignment)? {
             let expression = self.parse_expression()?;
@@ -96,9 +93,7 @@ impl<'a> Parser<'a> {
       };
     }
 
-    Ok(TopLevel {
-      functions
-    })
+    Ok(TopLevel { functions })
   }
   pub fn statement(&mut self) -> Result<Node<'a>, String> {
     let token = self.source.peek()?;
@@ -117,6 +112,29 @@ impl<'a> Parser<'a> {
             expression,
           )))))
         }
+      }
+      TokenKind::LeftCurly => self.parse_block(),
+      TokenKind::If => {
+        self.source.next_token()?;
+        let expression = self.parse_expression()?;
+        let then_branch = if self.source.test(TokenKind::LeftCurly) {
+          let block = self.parse_block()?;
+          block
+        } else {
+          let expression = self.parse_expression()?;
+          self.source.consume(TokenKind::SemiColon)?;
+          expression
+        };
+        let else_branch = if self.source.test_and_next(TokenKind::Else)? {
+          Some(Box::new(self.statement()?))
+        } else {
+          None
+        };
+        Ok(Node::Statement(Statement::Conditional {
+          then_branch: Box::new(then_branch),
+          expression: Box::new(expression),
+          else_branch,
+        }))
       }
       _ => {
         let expression = self.parse_expression()?;
@@ -211,14 +229,12 @@ impl<'a> Parser<'a> {
           break;
         }
         self.source.next_token()?;
-        let arguments = self.arguments(|parser| {
-          parser.parse_expression()
-        }, None)?;
+        let arguments = self.arguments(|parser| parser.parse_expression(), None)?;
         self.source.consume(TokenKind::RightParentheses)?;
         if lhs.as_identifier().is_some() {
           lhs = Node::Expression(Expression::Call {
             name: Box::new(lhs),
-            arguments
+            arguments,
           })
         }
       }
@@ -228,7 +244,9 @@ impl<'a> Parser<'a> {
   }
   pub fn infix_binding_power(operator: &TokenKind) -> Option<(u8, u8)> {
     match operator {
-      TokenKind::Less | TokenKind::LessEqual | TokenKind::Greater | TokenKind::GreaterEqual => Some((1, 2)),
+      TokenKind::Less | TokenKind::LessEqual | TokenKind::Greater | TokenKind::GreaterEqual => {
+        Some((1, 2))
+      }
       TokenKind::And => Some((2, 3)),
       TokenKind::Or => Some((3, 4)),
       TokenKind::Equal | TokenKind::NotEqual => Some((4, 5)),
@@ -253,7 +271,9 @@ impl<'a> Parser<'a> {
 
 #[cfg(test)]
 mod tests {
-  use ast::{Argument, Expression, Function, Node, Operator, Statement, TopLevel, Type, UnaryOperator};
+  use ast::{
+    Argument, Expression, Function, Node, Operator, Statement, TopLevel, Type, UnaryOperator,
+  };
 
   use crate::Parser;
 
@@ -267,11 +287,14 @@ mod tests {
       name: "main",
       arguments: vec![],
       body: Box::new(Node::Block(vec![])),
-      return_type: Type {name: "void"}
+      return_type: Type { name: "void" },
     };
-    check("function main() {}", TopLevel {
-      functions: vec![function]
-    })
+    check(
+      "function main() {}",
+      TopLevel {
+        functions: vec![function],
+      },
+    )
   }
   #[test]
   fn can_parse_inline_function() {
@@ -281,13 +304,16 @@ mod tests {
       body: Box::new(Node::Expression(Expression::Binary {
         lhs: Box::new(Node::Integer("2")),
         rhs: Box::new(Node::Integer("2")),
-        operator: Operator::Plus
+        operator: Operator::Plus,
       })),
-      return_type: Type {name: "void"}
+      return_type: Type { name: "void" },
     };
-    check("function main() = 2 + 2;", TopLevel {
-      functions: vec![function]
-    });
+    check(
+      "function main() = 2 + 2;",
+      TopLevel {
+        functions: vec![function],
+      },
+    );
   }
   #[test]
   fn can_parse_function_with_arguments() {
@@ -295,187 +321,204 @@ mod tests {
       name: "main",
       arguments: vec![Argument {
         name: "a",
-        argument_type: Type {
-          name: "i32"
-        }
+        argument_type: Type { name: "i32" },
       }],
       body: Box::new(Node::Block(vec![])),
-      return_type: Type {name: "void"}
+      return_type: Type { name: "void" },
     };
-    check("function main(a: i32) {}", TopLevel { functions: vec![function] });
+    check(
+      "function main(a: i32) {}",
+      TopLevel {
+        functions: vec![function],
+      },
+    );
   }
   #[test]
   fn can_parse_function_with_multiple_arguments() {
     let function = Function {
       name: "main",
-      arguments: vec![Argument {
-        name: "a",
-        argument_type: Type {
-          name: "i32"
-        }
-      }, Argument {
-        name: "b",
-        argument_type: Type {
-          name: "i32"
-        }
-      }],
+      arguments: vec![
+        Argument {
+          name: "a",
+          argument_type: Type { name: "i32" },
+        },
+        Argument {
+          name: "b",
+          argument_type: Type { name: "i32" },
+        },
+      ],
       body: Box::new(Node::Block(vec![])),
-      return_type: Type {name: "void"}
+      return_type: Type { name: "void" },
     };
-    check("function main(a: i32, b: i32) {}", TopLevel {
-      functions: vec![function]
-    });
+    check(
+      "function main(a: i32, b: i32) {}",
+      TopLevel {
+        functions: vec![function],
+      },
+    );
   }
   #[test]
   fn can_parse_binary_expression() {
     let function = Function {
       name: "main",
       arguments: vec![],
-      body: Box::new(Node::Block(vec![
-        Node::Expression(Expression::Binary {
-          lhs: Box::new(Node::Integer("1")),
-          rhs: Box::new(Node::Integer("2")),
-          operator: Operator::Plus
-        })
-      ])),
-      return_type: Type {name: "void"}
+      body: Box::new(Node::Block(vec![Node::Expression(Expression::Binary {
+        lhs: Box::new(Node::Integer("1")),
+        rhs: Box::new(Node::Integer("2")),
+        operator: Operator::Plus,
+      })])),
+      return_type: Type { name: "void" },
     };
-    check("function main() {
+    check(
+      "function main() {
       1 + 2;
-    }", TopLevel {
-      functions: vec![function]
-    });
+    }",
+      TopLevel {
+        functions: vec![function],
+      },
+    );
   }
   #[test]
   fn can_parse_binary_expression_with_logical() {
     let function = Function {
       name: "main",
       arguments: vec![],
-      body: Box::new(Node::Block(vec![
-        Node::Expression(Expression::Binary {
-          lhs: Box::new(Node::Integer("1")),
-          rhs: Box::new(Node::Integer("2")),
-          operator: Operator::Equal
-        })
-      ])),
-      return_type: Type {name: "void"}
+      body: Box::new(Node::Block(vec![Node::Expression(Expression::Binary {
+        lhs: Box::new(Node::Integer("1")),
+        rhs: Box::new(Node::Integer("2")),
+        operator: Operator::Equal,
+      })])),
+      return_type: Type { name: "void" },
     };
-    check("function main() {
+    check(
+      "function main() {
       1 == 2;
-    }", TopLevel {
-      functions: vec![function]
-    });
+    }",
+      TopLevel {
+        functions: vec![function],
+      },
+    );
   }
   #[test]
   fn can_parse_float() {
     let function = Function {
       name: "main",
       arguments: vec![],
-      body: Box::new(Node::Block(vec![
-        Node::Expression(Expression::Binary {
-          lhs: Box::new(Node::Float("1.1")),
-          rhs: Box::new(Node::Float("2.2")),
-          operator: Operator::Plus
-        })
-      ])),
-      return_type: Type {name: "void"}
+      body: Box::new(Node::Block(vec![Node::Expression(Expression::Binary {
+        lhs: Box::new(Node::Float("1.1")),
+        rhs: Box::new(Node::Float("2.2")),
+        operator: Operator::Plus,
+      })])),
+      return_type: Type { name: "void" },
     };
-    check("function main() {
+    check(
+      "function main() {
       1.1 + 2.2;
-    }", TopLevel {
-      functions: vec![function]
-    });
+    }",
+      TopLevel {
+        functions: vec![function],
+      },
+    );
   }
   #[test]
   fn can_parse_boolean() {
     let function = Function {
       name: "main",
       arguments: vec![],
-      body: Box::new(Node::Block(vec![
-        Node::Expression(Expression::Binary {
-          lhs: Box::new(Node::Boolean(true)),
-          rhs: Box::new(Node::Boolean(false)),
-          operator: Operator::And
-        })
-      ])),
-      return_type: Type {name: "void"}
+      body: Box::new(Node::Block(vec![Node::Expression(Expression::Binary {
+        lhs: Box::new(Node::Boolean(true)),
+        rhs: Box::new(Node::Boolean(false)),
+        operator: Operator::And,
+      })])),
+      return_type: Type { name: "void" },
     };
-    check("function main() {
+    check(
+      "function main() {
       true && false;
-    }", TopLevel {
-      functions: vec![function]
-    });
+    }",
+      TopLevel {
+        functions: vec![function],
+      },
+    );
   }
   #[test]
   fn can_parse_group() {
     let function = Function {
       name: "main",
       arguments: vec![],
-      body: Box::new(Node::Block(vec![
-        Node::Expression(Expression::Binary {
-          lhs: Box::new(Node::Float("1.1")),
-          rhs: Box::new(Node::Float("2.2")),
-          operator: Operator::Plus
-        })
-      ])),
-      return_type: Type {name: "void"}
+      body: Box::new(Node::Block(vec![Node::Expression(Expression::Binary {
+        lhs: Box::new(Node::Float("1.1")),
+        rhs: Box::new(Node::Float("2.2")),
+        operator: Operator::Plus,
+      })])),
+      return_type: Type { name: "void" },
     };
-    check("function main() {
+    check(
+      "function main() {
       (1.1 + 2.2);
-    }", TopLevel {
-      functions: vec![function]
-    });
+    }",
+      TopLevel {
+        functions: vec![function],
+      },
+    );
   }
   #[test]
   fn can_parse_unary_expression() {
     let function = Function {
       name: "main",
       arguments: vec![],
-      body: Box::new(Node::Block(vec![
-        Node::Expression(Expression::Unary {
-          argument: Box::new(Node::Integer("1")),
-          operator: UnaryOperator::Minus
-        })
-      ])),
-      return_type: Type {name: "void"}
+      body: Box::new(Node::Block(vec![Node::Expression(Expression::Unary {
+        argument: Box::new(Node::Integer("1")),
+        operator: UnaryOperator::Minus,
+      })])),
+      return_type: Type { name: "void" },
     };
-    check("function main() {
+    check(
+      "function main() {
       -1;
-    }", TopLevel {
-      functions: vec![function]
-    });
+    }",
+      TopLevel {
+        functions: vec![function],
+      },
+    );
   }
   #[test]
   fn can_parse_unary_expression_with_float() {
     let function = Function {
       name: "main",
       arguments: vec![],
-      body: Box::new(Node::Block(vec![
-        Node::Expression(Expression::Unary {
-          argument: Box::new(Node::Float("1.1")),
-          operator: UnaryOperator::Minus
-        })
-      ])),
-      return_type: Type {name: "void"}
+      body: Box::new(Node::Block(vec![Node::Expression(Expression::Unary {
+        argument: Box::new(Node::Float("1.1")),
+        operator: UnaryOperator::Minus,
+      })])),
+      return_type: Type { name: "void" },
     };
-    check("function main() {
+    check(
+      "function main() {
       -1.1;
-    }", TopLevel {
-      functions: vec![function]
-    });
+    }",
+      TopLevel {
+        functions: vec![function],
+      },
+    );
   }
   #[test]
   fn can_parse_return() {
     let function = Function {
       name: "main",
       arguments: vec![],
-      body: Box::new(Node::Block(vec![
-        Node::Statement(Statement::Return(Some(Box::new(Node::Float("1.1")))))
-      ])),
-      return_type: Type {name: "void"}
+      body: Box::new(Node::Block(vec![Node::Statement(Statement::Return(Some(
+        Box::new(Node::Float("1.1")),
+      )))])),
+      return_type: Type { name: "void" },
     };
-    check("function main() {
+    check(
+      "function main() {
       return 1.1;
-    }", TopLevel { functions: vec![function] });
+    }",
+      TopLevel {
+        functions: vec![function],
+      },
+    );
   }
 }
