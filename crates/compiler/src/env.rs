@@ -1,5 +1,6 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
+#[derive(Clone)]
 pub struct Environment<'a, T> {
   pub store: HashMap<&'a str, T>,
   pub parent: Option<Rc<RefCell<Environment<'a, T>>>>,

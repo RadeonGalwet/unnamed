@@ -112,6 +112,10 @@ pub enum TokenKind {
   True,
   #[token("false")]
   False,
+  #[token("let")]
+  Let,
+  #[token("mut")]
+  Mut,
 }
 
 #[cfg(test)]

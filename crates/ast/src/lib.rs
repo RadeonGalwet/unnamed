@@ -30,6 +30,7 @@ pub enum Operator {
   GreaterEqual,
   And,
   Or,
+  Assignment,
 }
 
 #[derive(Debug, PartialEq)]
@@ -75,5 +76,11 @@ pub enum Statement<'a> {
     then_branch: Box<Node<'a>>,
     expression: Box<Node<'a>>,
     else_branch: Option<Box<Node<'a>>>,
+  },
+  LetBinding {
+    id: &'a str,
+    mutable: bool,
+    init: Option<Box<Node<'a>>>,
+    init_type: Option<&'a str>,
   },
 }

@@ -8,7 +8,6 @@ inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", feat
 ast = { path = "../ast" }
 enum-as-inner = "0.3.3"
 parser = { path = "../parser" }
-paste = "1.0.5"
 
 [dev-dependencies]
 parser = { path = "../parser" }

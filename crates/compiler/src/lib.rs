@@ -5,6 +5,7 @@ pub mod function_signature;
 pub mod state;
 pub mod r#type;
 pub mod value;
+pub mod variable;
 
 use std::{cell::RefCell, cmp::Ordering, collections::HashMap, rc::Rc};
 
@@ -23,6 +24,7 @@ use inkwell::{
 };
 use state::State;
 use value::Value;
+use variable::Variable;
 
 use crate::r#type::Type as RuntimeType;
 
@@ -32,7 +34,7 @@ pub struct Compiler<'a> {
   module: Module<'a>,
   fpm: PassManager<FunctionValue<'a>>,
   named_values: HashMap<&'a str, Value<'a>>,
-  environment: Rc<RefCell<Environment<'a, Value<'a>>>>,
+  environment: Rc<RefCell<Environment<'a, Variable<'a>>>>,
   function: Option<FunctionValue<'a>>,
   block: Option<BasicBlock<'a>>,
   functions: HashMap<&'a str, FunctionSignature<'a>>,
@@ -154,7 +156,7 @@ impl<'a> Compiler<'a> {
       value.set_name(compile_time_argument.1);
       self.environment.borrow_mut().set(
         compile_time_argument.1,
-        Value::Pointer(pointer, compile_time_argument.0),
+        Variable::new(true, Value::Pointer(pointer, compile_time_argument.0)),
       );
     }
     self.function = Some(fn_value);
@@ -200,7 +202,7 @@ impl<'a> Compiler<'a> {
     }
   }
 
-  pub fn compile_node(&mut self, node: Node<'a>) -> Result<Option<Value<'a>>, String> {
+  pub fn compile_node(&mut self, node: Node<'a>) -> Result<Option<Variable<'a>>, String> {
     match node {
       Node::Identifier(id) => {
         let mut value = if let Ok(value) = self.environment.borrow_mut().get(id) {
@@ -210,24 +212,26 @@ impl<'a> Compiler<'a> {
             .named_values
             .get(id)
             .ok_or(format!("Unknown variable {}", id))?;
-          *value
+          Variable::build_const(*value)
         };
-        if let Some((ptr, ptr_type)) = value.as_pointer() {
+        if let Some((ptr, ptr_type)) = value.value.as_pointer() {
           value = load_ptr!(ptr_type, ptr, self);
         }
         Ok(Some(value))
       }
-      Node::Integer(integer) => Ok(Some(Value::I32(
+      Node::Integer(integer) => Ok(Some(Variable::build_const(Value::I32(
         self
           .context
           .i32_type()
           .const_int_from_string(integer, StringRadix::Decimal)
           .ok_or("Invalid integer")?,
-      ))),
-      Node::Float(float) => Ok(Some(Value::F64(
+      )))),
+      Node::Float(float) => Ok(Some(Variable::build_const(Value::F64(
         self.context.f64_type().const_float_from_string(float),
+      )))),
+      Node::Expression(expression) => Ok(Some(Variable::build_const(
+        self.compile_expression(expression)?,
       ))),
-      Node::Expression(expression) => Ok(Some(self.compile_expression(expression)?)),
       Node::Statement(statement) => {
         self.compile_statement(statement)?;
         Ok(None)
@@ -241,9 +245,9 @@ impl<'a> Compiler<'a> {
         self.environment = old_env;
         Ok(None)
       }
-      Node::Boolean(boolean) => Ok(Some(Value::Boolean(
+      Node::Boolean(boolean) => Ok(Some(Variable::build_const(Value::Boolean(
         self.context.bool_type().const_int(boolean as u64, false),
-      ))),
+      )))),
     }
   }
   pub fn compile_statement(&mut self, statement: Statement<'a>) -> Result<(), String> {
@@ -254,7 +258,7 @@ impl<'a> Compiler<'a> {
           let value = self.compile_node(*value)?.unwrap();
           self
             .builder
-            .build_return(Some(&BasicValueEnum::from(value)))
+            .build_return(Some(&BasicValueEnum::from(value.value)))
         } else {
           self.builder.build_return(None)
         };
@@ -267,6 +271,7 @@ impl<'a> Compiler<'a> {
         let comparison = *(self
           .compile_node(*expression)?
           .ok_or("Not expression")?
+          .value
           .as_boolean()
           .ok_or("Not boolean")?);
         let then_block = self
@@ -298,454 +303,127 @@ impl<'a> Compiler<'a> {
         self.reset_state();
         self.builder.position_at_end(continue_block);
       }
+      Statement::LetBinding {
+        id,
+        mutable,
+        init,
+        init_type,
+      } => {
+        if let Some(init) = init {
+          let value = self.compile_node(*init)?.unwrap().value;
+          let value_type = RuntimeType::from(value);
+          if let Some(init_type) = init_type {
+            let init_type = RuntimeType::from(init_type);
+            if init_type != value_type {
+              return Err(format!(
+                "type '{}' is not assignable to type '{}'",
+                init_type.to_string(),
+                value_type.to_string()
+              ));
+            }
+          }
+          let pointer = self.builder.build_alloca(
+            self.patch_type(&value_type.to_string())?,
+            format!("{}_alloca", id).as_str(),
+          ); // TODO: REFACTOR PATCH_TYPE
+          self
+            .builder
+            .build_store(pointer, BasicValueEnum::from(value));
+          self.environment.borrow_mut().set(
+            id,
+            Variable::new(mutable, Value::Pointer(pointer, value_type)),
+          )
+        } else {
+          return Err("Variables without init not supported now".to_string());
+        }
+      }
     };
     Ok(())
   }
   pub fn compile_expression(&mut self, expression: Expression<'a>) -> Result<Value<'a>, String> {
     match expression {
+      // TODO!!!: REFACTOR THIS SHIT
       Expression::Binary { operator, lhs, rhs } => {
-        let lhs = self.compile_node(*lhs)?.unwrap();
-        let rhs = self.compile_node(*rhs)?.unwrap();
-        // TODO: Create macro for this repeating code
-        match (lhs, rhs) {
-          (Value::Boolean(lhs), Value::Boolean(rhs)) => Ok(Value::Boolean(match operator {
-            Operator::Equal => {
-              self
-                .builder
-                .build_int_compare(IntPredicate::EQ, lhs, rhs, "i16_eq_cmp")
+        if operator == Operator::Assignment {
+          let id = *(lhs.as_identifier().ok_or("Not id")?);
+          let env_clone = Rc::clone(&self.environment);
+          let mut env = env_clone.borrow_mut();
+          let env_clone2 = env.clone();
+          let variable = env_clone2.get(id)?;
+          if !variable.mutable {
+            return Err("Can't change immutable variable".to_string());
+          }
+          let value = self.compile_node(*rhs)?.unwrap().value;
+          let pointer = variable.value.as_pointer().unwrap();
+          self.builder.build_free(*(pointer.0));
+          let new_pointer = self.builder.build_alloca(
+            self.patch_type(pointer.1.to_string().as_str())?,
+            format!("changed_{}_alloca", id).as_str(),
+          );
+          self
+            .builder
+            .build_store(new_pointer, BasicValueEnum::from(value));
+          env.set(
+            id,
+            Variable::new(true, Value::Pointer(new_pointer, *(pointer.1))),
+          );
+          Ok(Value::Pointer(new_pointer, *(pointer.1)))
+        } else {
+          let lhs = self.compile_node(*lhs)?.unwrap().value;
+          let rhs = self.compile_node(*rhs)?.unwrap().value;
+          match (lhs, rhs) {
+            (Value::Boolean(lhs), Value::Boolean(rhs)) => Ok(Value::Boolean(match operator {
+              Operator::Equal => {
+                self
+                  .builder
+                  .build_int_compare(IntPredicate::EQ, lhs, rhs, "i16_eq_cmp")
+              }
+              Operator::NotEqual => {
+                self
+                  .builder
+                  .build_int_compare(IntPredicate::NE, lhs, rhs, "i16_ne_cmp")
+              }
+              Operator::Less => {
+                self
+                  .builder
+                  .build_int_compare(IntPredicate::SLT, lhs, rhs, "i16_slt_cmp")
+              }
+              Operator::LessEqual => {
+                self
+                  .builder
+                  .build_int_compare(IntPredicate::SLE, lhs, rhs, "i16_sle_cmp")
+              }
+              Operator::Greater => {
+                self
+                  .builder
+                  .build_int_compare(IntPredicate::SGT, lhs, rhs, "i16_sgt_cmp")
+              }
+              Operator::GreaterEqual => {
+                self
+                  .builder
+                  .build_int_compare(IntPredicate::SGE, lhs, rhs, "i16_sge_cmp")
+              }
+              Operator::And => self.builder.build_and(lhs, rhs, "i16_and"),
+              Operator::Or => self.builder.build_and(lhs, rhs, "i16_or"),
+              _ => return Err("Boolean don't supports arithmetic operations".to_string()),
+            })),
+            (Value::I8(lhs), Value::I8(rhs)) => Ok(infix_int!(self, I8, operator, lhs, rhs)),
+            (Value::I16(lhs), Value::I16(rhs)) => Ok(infix_int!(self, I16, operator, lhs, rhs)),
+            (Value::I32(lhs), Value::I32(rhs)) => Ok(infix_int!(self, I32, operator, lhs, rhs)),
+            (Value::I64(lhs), Value::I64(rhs)) => Ok(infix_int!(self, I64, operator, lhs, rhs)),
+            (Value::I128(lhs), Value::I128(rhs)) => Ok(infix_int!(self, I128, operator, lhs, rhs)),
+            (Value::F16(lhs), Value::F16(rhs)) => Ok(infix_float!(self, F16, operator, lhs, rhs)),
+            (Value::F32(lhs), Value::F32(rhs)) => Ok(infix_float!(self, F32, operator, lhs, rhs)),
+            (Value::F64(lhs), Value::F64(rhs)) => Ok(infix_float!(self, F64, operator, lhs, rhs)),
+            (Value::F128(lhs), Value::F128(rhs)) => {
+              Ok(infix_float!(self, F128, operator, lhs, rhs))
             }
-            Operator::NotEqual => {
-              self
-                .builder
-                .build_int_compare(IntPredicate::NE, lhs, rhs, "i16_ne_cmp")
-            }
-            Operator::Less => {
-              self
-                .builder
-                .build_int_compare(IntPredicate::SLT, lhs, rhs, "i16_slt_cmp")
-            }
-            Operator::LessEqual => {
-              self
-                .builder
-                .build_int_compare(IntPredicate::SLE, lhs, rhs, "i16_sle_cmp")
-            }
-            Operator::Greater => {
-              self
-                .builder
-                .build_int_compare(IntPredicate::SGT, lhs, rhs, "i16_sgt_cmp")
-            }
-            Operator::GreaterEqual => {
-              self
-                .builder
-                .build_int_compare(IntPredicate::SGE, lhs, rhs, "i16_sge_cmp")
-            }
-            Operator::And => self.builder.build_and(lhs, rhs, "i16_and"),
-            Operator::Or => self.builder.build_and(lhs, rhs, "i16_or"),
-            _ => return Err("Boolean don't supports arithmetic operations".to_string()),
-          })),
-          (Value::I8(lhs), Value::I8(rhs)) => Ok(match operator {
-            Operator::Plus => Value::I8(self.builder.build_int_add(lhs, rhs, "i8_add")),
-            Operator::Minus => Value::I8(self.builder.build_int_add(lhs, rhs, "i8_add")),
-            Operator::Multiply => Value::I8(self.builder.build_int_mul(lhs, rhs, "i8_add")),
-            Operator::Divide => Value::I8(self.builder.build_int_signed_div(lhs, rhs, "i8_add")),
-            Operator::Equal => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::EQ,
-              lhs,
-              rhs,
-              "i8_eq_cmp",
-            )),
-            Operator::NotEqual => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::NE,
-              lhs,
-              rhs,
-              "i8_ne_cmp",
-            )),
-            Operator::Less => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SLT,
-              lhs,
-              rhs,
-              "i8_slt_cmp",
-            )),
-            Operator::LessEqual => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SLE,
-              lhs,
-              rhs,
-              "i8_sle_cmp",
-            )),
-            Operator::Greater => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SGT,
-              lhs,
-              rhs,
-              "i8_sgt_cmp",
-            )),
-            Operator::GreaterEqual => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SGE,
-              lhs,
-              rhs,
-              "i8_sge_cmp",
-            )),
-            Operator::And => Value::I8(self.builder.build_and(lhs, rhs, "i8_and")),
-            Operator::Or => Value::I8(self.builder.build_and(lhs, rhs, "i8_or")),
-          }),
-          (Value::I16(lhs), Value::I16(rhs)) => Ok(match operator {
-            Operator::Plus => Value::I16(self.builder.build_int_add(lhs, rhs, "i16_add")),
-            Operator::Minus => Value::I16(self.builder.build_int_add(lhs, rhs, "i16_add")),
-            Operator::Multiply => Value::I16(self.builder.build_int_mul(lhs, rhs, "i16_add")),
-            Operator::Divide => Value::I16(self.builder.build_int_signed_div(lhs, rhs, "i16_add")),
-            Operator::Equal => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::EQ,
-              lhs,
-              rhs,
-              "i16_eq_cmp",
-            )),
-            Operator::NotEqual => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::NE,
-              lhs,
-              rhs,
-              "i16_ne_cmp",
-            )),
-            Operator::Less => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SLT,
-              lhs,
-              rhs,
-              "i16_slt_cmp",
-            )),
-            Operator::LessEqual => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SLE,
-              lhs,
-              rhs,
-              "i16_sle_cmp",
-            )),
-            Operator::Greater => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SGT,
-              lhs,
-              rhs,
-              "i16_sgt_cmp",
-            )),
-            Operator::GreaterEqual => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SGE,
-              lhs,
-              rhs,
-              "i16_sge_cmp",
-            )),
-            Operator::And => Value::I16(self.builder.build_and(lhs, rhs, "i16_and")),
-            Operator::Or => Value::I16(self.builder.build_and(lhs, rhs, "i16_or")),
-          }),
-          (Value::I32(lhs), Value::I32(rhs)) => Ok(match operator {
-            Operator::Plus => Value::I32(self.builder.build_int_add(lhs, rhs, "i32_add")),
-            Operator::Minus => Value::I32(self.builder.build_int_add(lhs, rhs, "i32_add")),
-            Operator::Multiply => Value::I32(self.builder.build_int_mul(lhs, rhs, "i32_add")),
-            Operator::Divide => Value::I32(self.builder.build_int_signed_div(lhs, rhs, "i32_add")),
-            Operator::Equal => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::EQ,
-              lhs,
-              rhs,
-              "i32_eq_cmp",
-            )),
-            Operator::NotEqual => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::NE,
-              lhs,
-              rhs,
-              "i32_ne_cmp",
-            )),
-            Operator::Less => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SLT,
-              lhs,
-              rhs,
-              "i32_slt_cmp",
-            )),
-            Operator::LessEqual => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SLE,
-              lhs,
-              rhs,
-              "i32_sle_cmp",
-            )),
-            Operator::Greater => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SGT,
-              lhs,
-              rhs,
-              "i32_sgt_cmp",
-            )),
-            Operator::GreaterEqual => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SGE,
-              lhs,
-              rhs,
-              "i32_sge_cmp",
-            )),
-            Operator::And => Value::I32(self.builder.build_and(lhs, rhs, "i32_and")),
-            Operator::Or => Value::I32(self.builder.build_and(lhs, rhs, "i32_or")),
-          }),
-          (Value::I64(lhs), Value::I64(rhs)) => Ok(match operator {
-            Operator::Plus => Value::I64(self.builder.build_int_add(lhs, rhs, "I64_add")),
-            Operator::Minus => Value::I64(self.builder.build_int_add(lhs, rhs, "I64_add")),
-            Operator::Multiply => Value::I64(self.builder.build_int_mul(lhs, rhs, "I64_add")),
-            Operator::Divide => Value::I64(self.builder.build_int_signed_div(lhs, rhs, "I64_add")),
-            Operator::Equal => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::EQ,
-              lhs,
-              rhs,
-              "I64_eq_cmp",
-            )),
-            Operator::NotEqual => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::NE,
-              lhs,
-              rhs,
-              "I64_ne_cmp",
-            )),
-            Operator::Less => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SLT,
-              lhs,
-              rhs,
-              "I64_slt_cmp",
-            )),
-            Operator::LessEqual => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SLE,
-              lhs,
-              rhs,
-              "I64_sle_cmp",
-            )),
-            Operator::Greater => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SGT,
-              lhs,
-              rhs,
-              "I64_sgt_cmp",
-            )),
-            Operator::GreaterEqual => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SGE,
-              lhs,
-              rhs,
-              "I64_sge_cmp",
-            )),
-            Operator::And => Value::I64(self.builder.build_and(lhs, rhs, "I64_and")),
-            Operator::Or => Value::I64(self.builder.build_and(lhs, rhs, "I64_or")),
-          }),
-          (Value::I128(lhs), Value::I128(rhs)) => Ok(match operator {
-            Operator::Plus => Value::I128(self.builder.build_int_add(lhs, rhs, "i128_add")),
-            Operator::Minus => Value::I128(self.builder.build_int_add(lhs, rhs, "i128_add")),
-            Operator::Multiply => Value::I128(self.builder.build_int_mul(lhs, rhs, "i128_add")),
-            Operator::Divide => {
-              Value::I128(self.builder.build_int_signed_div(lhs, rhs, "i128_add"))
-            }
-            Operator::Equal => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::EQ,
-              lhs,
-              rhs,
-              "i128_eq_cmp",
-            )),
-            Operator::NotEqual => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::NE,
-              lhs,
-              rhs,
-              "i128_ne_cmp",
-            )),
-            Operator::Less => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SLT,
-              lhs,
-              rhs,
-              "i128_slt_cmp",
-            )),
-            Operator::LessEqual => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SLE,
-              lhs,
-              rhs,
-              "i128_sle_cmp",
-            )),
-            Operator::Greater => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SGT,
-              lhs,
-              rhs,
-              "i128_sgt_cmp",
-            )),
-            Operator::GreaterEqual => Value::Boolean(self.builder.build_int_compare(
-              IntPredicate::SGE,
-              lhs,
-              rhs,
-              "i128_sge_cmp",
-            )),
-            Operator::And => Value::I128(self.builder.build_and(lhs, rhs, "i128_and")),
-            Operator::Or => Value::I128(self.builder.build_and(lhs, rhs, "i128_or")),
-          }),
-          (Value::F16(lhs), Value::F16(rhs)) => Ok(match operator {
-            Operator::Plus => Value::F16(self.builder.build_float_add(lhs, rhs, "i128_add")),
-            Operator::Minus => Value::F16(self.builder.build_float_sub(lhs, rhs, "i128_sub")),
-            Operator::Multiply => Value::F16(self.builder.build_float_mul(lhs, rhs, "i128_mul")),
-            Operator::Divide => Value::F16(self.builder.build_float_div(lhs, rhs, "i128_mul")),
-            Operator::Equal => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OEQ,
-              lhs,
-              rhs,
-              "i128_eq_cmp",
-            )),
-            Operator::NotEqual => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::ONE,
-              lhs,
-              rhs,
-              "i128_ne_cmp",
-            )),
-            Operator::Less => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OLT,
-              lhs,
-              rhs,
-              "i128_slt_cmp",
-            )),
-            Operator::LessEqual => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OLE,
-              lhs,
-              rhs,
-              "i128_sle_cmp",
-            )),
-            Operator::Greater => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OGT,
-              lhs,
-              rhs,
-              "i128_sgt_cmp",
-            )),
-            Operator::GreaterEqual => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OGE,
-              lhs,
-              rhs,
-              "i128_sge_cmp",
-            )),
-            Operator::And => return Err("Floats don't support bits operations".to_string()),
-            Operator::Or => return Err("Floats don't support bits operations".to_string()),
-          }),
-          (Value::F32(lhs), Value::F32(rhs)) => Ok(match operator {
-            Operator::Plus => Value::F16(self.builder.build_float_add(lhs, rhs, "i128_add")),
-            Operator::Minus => Value::F16(self.builder.build_float_sub(lhs, rhs, "i128_sub")),
-            Operator::Multiply => Value::F16(self.builder.build_float_mul(lhs, rhs, "i128_mul")),
-            Operator::Divide => Value::F16(self.builder.build_float_div(lhs, rhs, "i128_mul")),
-            Operator::Equal => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OEQ,
-              lhs,
-              rhs,
-              "i128_eq_cmp",
-            )),
-            Operator::NotEqual => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::ONE,
-              lhs,
-              rhs,
-              "i128_ne_cmp",
-            )),
-            Operator::Less => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OLT,
-              lhs,
-              rhs,
-              "i128_slt_cmp",
-            )),
-            Operator::LessEqual => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OLE,
-              lhs,
-              rhs,
-              "i128_sle_cmp",
-            )),
-            Operator::Greater => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OGT,
-              lhs,
-              rhs,
-              "i128_sgt_cmp",
-            )),
-            Operator::GreaterEqual => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OGE,
-              lhs,
-              rhs,
-              "i128_sge_cmp",
-            )),
-            Operator::And => return Err("Floats don't support bits operations".to_string()),
-            Operator::Or => return Err("Floats don't support bits operations".to_string()),
-          }),
-          (Value::F64(lhs), Value::F64(rhs)) => Ok(match operator {
-            Operator::Plus => Value::F16(self.builder.build_float_add(lhs, rhs, "i128_add")),
-            Operator::Minus => Value::F16(self.builder.build_float_sub(lhs, rhs, "i128_sub")),
-            Operator::Multiply => Value::F16(self.builder.build_float_mul(lhs, rhs, "i128_mul")),
-            Operator::Divide => Value::F16(self.builder.build_float_div(lhs, rhs, "i128_mul")),
-            Operator::Equal => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OEQ,
-              lhs,
-              rhs,
-              "i128_eq_cmp",
-            )),
-            Operator::NotEqual => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::ONE,
-              lhs,
-              rhs,
-              "i128_ne_cmp",
-            )),
-            Operator::Less => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OLT,
-              lhs,
-              rhs,
-              "i128_slt_cmp",
-            )),
-            Operator::LessEqual => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OLE,
-              lhs,
-              rhs,
-              "i128_sle_cmp",
-            )),
-            Operator::Greater => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OGT,
-              lhs,
-              rhs,
-              "i128_sgt_cmp",
-            )),
-            Operator::GreaterEqual => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OGE,
-              lhs,
-              rhs,
-              "i128_sge_cmp",
-            )),
-            Operator::And => return Err("Floats don't support bits operations".to_string()),
-            Operator::Or => return Err("Floats don't support bits operations".to_string()),
-          }),
-          (Value::F128(lhs), Value::F128(rhs)) => Ok(match operator {
-            Operator::Plus => Value::F16(self.builder.build_float_add(lhs, rhs, "i128_add")),
-            Operator::Minus => Value::F16(self.builder.build_float_sub(lhs, rhs, "i128_sub")),
-            Operator::Multiply => Value::F16(self.builder.build_float_mul(lhs, rhs, "i128_mul")),
-            Operator::Divide => Value::F16(self.builder.build_float_div(lhs, rhs, "i128_mul")),
-            Operator::Equal => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OEQ,
-              lhs,
-              rhs,
-              "i128_eq_cmp",
-            )),
-            Operator::NotEqual => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::ONE,
-              lhs,
-              rhs,
-              "i128_ne_cmp",
-            )),
-            Operator::Less => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OLT,
-              lhs,
-              rhs,
-              "i128_slt_cmp",
-            )),
-            Operator::LessEqual => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OLE,
-              lhs,
-              rhs,
-              "i128_sle_cmp",
-            )),
-            Operator::Greater => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OGT,
-              lhs,
-              rhs,
-              "i128_sgt_cmp",
-            )),
-            Operator::GreaterEqual => Value::Boolean(self.builder.build_float_compare(
-              FloatPredicate::OGE,
-              lhs,
-              rhs,
-              "i128_sge_cmp",
-            )),
-            Operator::And => return Err("Floats don't support bits operations".to_string()),
-            Operator::Or => return Err("Floats don't support bits operations".to_string()),
-          }),
-          _ => Err("Incompatible types in expression".into()),
+            _ => Err("Incompatible types in expression".into()),
+          }
         }
       }
       Expression::Unary { operator, argument } => {
-        let argument = self.compile_node(*argument)?.unwrap();
+        let argument = self.compile_node(*argument)?.unwrap().value;
         match argument {
           Value::I8(int) => Ok(match operator {
             UnaryOperator::Minus => Value::I16(self.builder.build_int_neg(int, "i8_neg")),
@@ -804,6 +482,7 @@ impl<'a> Compiler<'a> {
             }
             let mut compiled_arguments = vec![];
             for (index, value) in value_arguments.iter().enumerate() {
+              let value = value.value;
               let value_type = RuntimeType::from(value);
               let expected_type = function_metadata.arguments[index];
               if value_type != expected_type.0 {

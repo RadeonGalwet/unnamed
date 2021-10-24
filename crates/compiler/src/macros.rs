@@ -1,6 +1,106 @@
+macro_rules! infix_int {
+  ($self: ident, $target: ident, $operator: ident, $lhs: ident, $rhs: ident) => {
+    match $operator {
+      Operator::Plus => Value::$target($self.builder.build_int_add($lhs, $rhs, "add")),
+      Operator::Minus => Value::$target($self.builder.build_int_sub($lhs, $rhs, "sub")),
+      Operator::Multiply => Value::$target($self.builder.build_int_mul($lhs, $rhs, "mul")),
+      Operator::Divide => Value::$target($self.builder.build_int_signed_div($lhs, $rhs, "div")),
+      Operator::Equal => Value::Boolean($self.builder.build_int_compare(
+        IntPredicate::EQ,
+        $lhs,
+        $rhs,
+        "eq_cmp",
+      )),
+      Operator::NotEqual => Value::Boolean($self.builder.build_int_compare(
+        IntPredicate::NE,
+        $lhs,
+        $rhs,
+        "ne_cmp",
+      )),
+      Operator::Less => Value::Boolean($self.builder.build_int_compare(
+        IntPredicate::SLT,
+        $lhs,
+        $rhs,
+        "slt_cmp",
+      )),
+      Operator::LessEqual => Value::Boolean($self.builder.build_int_compare(
+        IntPredicate::SLE,
+        $lhs,
+        $rhs,
+        "sle_cmp",
+      )),
+      Operator::Greater => Value::Boolean($self.builder.build_int_compare(
+        IntPredicate::SGT,
+        $lhs,
+        $rhs,
+        "sgt_cmp",
+      )),
+      Operator::GreaterEqual => Value::Boolean($self.builder.build_int_compare(
+        IntPredicate::SGE,
+        $lhs,
+        $rhs,
+        "sge_cmp",
+      )),
+      Operator::And => Value::$target($self.builder.build_and($lhs, $rhs, "and")),
+      Operator::Or => Value::$target($self.builder.build_and($lhs, $rhs, "or")),
+      Operator::Assignment => unreachable!(),
+    }
+  };
+}
+
+macro_rules! infix_float {
+  ($self: ident, $target: ident, $operator: ident, $lhs: ident, $rhs: ident) => {
+    match $operator {
+      Operator::Plus => Value::$target($self.builder.build_float_add($lhs, $rhs, "add")),
+      Operator::Minus => Value::$target($self.builder.build_float_sub($lhs, $rhs, "sub")),
+      Operator::Multiply => Value::$target($self.builder.build_float_mul($lhs, $rhs, "mul")),
+      Operator::Divide => Value::$target($self.builder.build_float_div($lhs, $rhs, "div")),
+      Operator::Equal => Value::Boolean($self.builder.build_float_compare(
+        FloatPredicate::OEQ,
+        $lhs,
+        $rhs,
+        "eq_cmp",
+      )),
+      Operator::NotEqual => Value::Boolean($self.builder.build_float_compare(
+        FloatPredicate::ONE,
+        $lhs,
+        $rhs,
+        "ne_cmp",
+      )),
+      Operator::Less => Value::Boolean($self.builder.build_float_compare(
+        FloatPredicate::OLT,
+        $lhs,
+        $rhs,
+        "slt_cmp",
+      )),
+      Operator::LessEqual => Value::Boolean($self.builder.build_float_compare(
+        FloatPredicate::OLE,
+        $lhs,
+        $rhs,
+        "sle_cmp",
+      )),
+      Operator::Greater => Value::Boolean($self.builder.build_float_compare(
+        FloatPredicate::OGT,
+        $lhs,
+        $rhs,
+        "sgt_cmp",
+      )),
+      Operator::GreaterEqual => Value::Boolean($self.builder.build_float_compare(
+        FloatPredicate::OGE,
+        $lhs,
+        $rhs,
+        "sge_cmp",
+      )),
+      Operator::And => return Err("Floats don't support bits operations".to_string()),
+      Operator::Or => return Err("Floats don't support bits operations".to_string()),
+      Operator::Assignment => unreachable!(),
+    }
+  };
+}
+
 macro_rules! load_ptr {
   ($type: ident, $value: ident, $self: ident) => {
-    match $type {
+    Variable::build_const(match $type {
       RuntimeType::Boolean => Value::Boolean(
         $self
           .builder
@@ -62,6 +162,6 @@ macro_rules! load_ptr {
           .into_float_value(),
       ),
       RuntimeType::Pointer => unreachable!(),
-    }
+    })
   };
 }

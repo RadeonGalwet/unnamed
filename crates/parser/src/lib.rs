@@ -136,6 +136,29 @@ impl<'a> Parser<'a> {
           else_branch,
         }))
       }
+      TokenKind::Let => {
+        self.source.next_token()?;
+        let mutable = self.source.test_and_next(TokenKind::Mut)?;
+        let id = self.source.consume(TokenKind::Identifier)?.value;
+        let init_type = if self.source.test_and_next(TokenKind::Colon)? {
+          Some(self.source.consume(TokenKind::Identifier)?.value)
+        } else {
+          None
+        };
+        let init = if self.source.test_and_next(TokenKind::Assignment)? {
+          let expression = self.parse_expression()?;
+          self.source.consume(TokenKind::SemiColon)?;
+          Some(Box::new(expression))
+        } else {
+          None
+        };
+        Ok(Node::Statement(Statement::LetBinding {
+          id,
+          mutable,
+          init,
+          init_type,
+        }))
+      }
       _ => {
         let expression = self.parse_expression()?;
         self.source.consume(TokenKind::SemiColon)?;
@@ -200,6 +223,7 @@ impl<'a> Parser<'a> {
         if left_binding_power < minimal_binding_power {
           break;
         }
+
         let operator = match token.kind {
           TokenKind::Plus => Operator::Plus,
           TokenKind::Minus => Operator::Minus,
@@ -213,6 +237,7 @@ impl<'a> Parser<'a> {
           TokenKind::GreaterEqual => Operator::GreaterEqual,
           TokenKind::And => Operator::And,
           TokenKind::Or => Operator::Or,
+          TokenKind::Assignment => Operator::Assignment,
           _ => break,
         };
         self.source.next_token()?;
@@ -252,6 +277,7 @@ impl<'a> Parser<'a> {
       TokenKind::Equal | TokenKind::NotEqual => Some((4, 5)),
       TokenKind::Plus | TokenKind::Minus => Some((5, 6)),
       TokenKind::Multiply | TokenKind::Divide => Some((7, 8)),
+      TokenKind::Assignment => Some((8, 9)),
       _ => None,
     }
   }
