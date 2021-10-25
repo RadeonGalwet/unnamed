@@ -33,7 +33,6 @@ pub struct Compiler<'a> {
   builder: Builder<'a>,
   module: Module<'a>,
   fpm: PassManager<FunctionValue<'a>>,
-  named_values: HashMap<&'a str, Value<'a>>,
   environment: Rc<RefCell<Environment<'a>>>,
   function: Option<FunctionValue<'a>>,
   block: Option<BasicBlock<'a>>,
@@ -55,7 +54,6 @@ impl<'a> Compiler<'a> {
       fpm,
       state: State::default(),
       environment: Rc::new(RefCell::new(Environment::new(None))),
-      named_values: HashMap::new(),
       functions: HashMap::new(),
       function: None,
       block: None,
@@ -518,8 +516,6 @@ mod tests {
     fpm.initialize();
     let mut compiler = Compiler::new(&context, build, module, fpm);
     compiler.compile(top_level).unwrap();
-    println!("{}", compiler.module().print_to_string().to_string());
-    println!("{}", bytecode);
     assert_eq!(
       compiler.module().print_to_string().to_string().as_str(),
       format!(
@@ -534,7 +530,7 @@ source_filename = "tests"
   fn can_compile_unary_expression() {
     check(
       r#"
-      function main() -> i32 {
+      function main() -> int32 {
         return -2;
       }
       "#,
@@ -550,7 +546,7 @@ main:
   fn can_compile_arguments_store_and_load() {
     check(
       r#"
-      function sum(a: i32) -> i32 {
+      function sum(a: int32) -> int32 {
         return a;
       }
       "#,
@@ -569,7 +565,7 @@ sum:
   fn can_compile_infix_expression() {
     check(
       r#"
-      function main() -> i32 {
+      function main() -> int32 {
         return 2 + 2;
       }
       "#,
@@ -585,7 +581,7 @@ main:
   fn can_compile_float() {
     check(
       r#"
-      function main() -> f64 {
+      function main() -> float64 {
         return 2.3;
       }
       "#,
@@ -601,7 +597,7 @@ main:
   fn can_compile_int() {
     check(
       r#"
-      function main() -> i32 {
+      function main() -> int32 {
         return 1;
       }
       "#,
@@ -648,7 +644,7 @@ main:
   #[test]
   fn can_compile_if_statement() {
   check(r#"
-  function mod(a : i32, b : i32) -> i32 {
+  function mod(a: int32, b: int32) -> int32 {
     if a > b {
       return mod(a - b, b);
     }

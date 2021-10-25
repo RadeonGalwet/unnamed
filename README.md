@@ -3,7 +3,7 @@
 ## Examples
 
 ```js
-function sum(a: i32, b: i32) -> i32 = a + b;
+function sum(a: int32, b: int32) -> int32 = a + b;
 function main() {
   let result = sum(1, 2);
   if result == 3 {

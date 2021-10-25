@@ -96,15 +96,15 @@ impl From<&str> for Type {
   fn from(str: &str) -> Self {
     match str {
       "boolean" => Self::Boolean,
-      "i8" => Self::I8,
-      "i16" => Self::I16,
-      "i32" => Self::I32,
-      "i64" => Self::I64,
-      "i128" => Self::I128,
-      "f16" => Self::F16,
-      "f32" => Self::F32,
-      "f64" => Self::F64,
-      "f128" => Self::F128,
+      "int8" => Self::I8,
+      "int16" => Self::I16,
+      "int32" => Self::I32,
+      "int64" => Self::I64,
+      "int128" => Self::I128,
+      "float16" => Self::F16,
+      "float32" => Self::F32,
+      "float64" => Self::F64,
+      "float128" => Self::F128,
       _ => unreachable!(),
     }
   }
@@ -114,16 +114,16 @@ impl ToString for Type {
   fn to_string(&self) -> String {
     match self {
       Type::Boolean => "boolean",
-      Type::I8 => "i8",
-      Type::I16 => "i16",
-      Type::I32 => "i32",
-      Type::I64 => "i64",
-      Type::I128 => "i128",
-      Type::F16 => "f16",
-      Type::F32 => "f32",
-      Type::F64 => "f64",
-      Type::F128 => "f128",
-      Type::Pointer => "ptr",
+      Type::I8 => "int8",
+      Type::I16 => "int16",
+      Type::I32 => "int32",
+      Type::I64 => "int64",
+      Type::I128 => "int128",
+      Type::F16 => "float16",
+      Type::F32 => "float32",
+      Type::F64 => "float64",
+      Type::F128 => "float128",
+      Type::Pointer => "*unknown",
     }
     .to_string()
   }
