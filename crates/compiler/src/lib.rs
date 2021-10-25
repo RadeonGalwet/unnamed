@@ -34,7 +34,7 @@ pub struct Compiler<'a> {
   module: Module<'a>,
   fpm: PassManager<FunctionValue<'a>>,
   named_values: HashMap<&'a str, Value<'a>>,
-  environment: Rc<RefCell<Environment<'a, Variable<'a>>>>,
+  environment: Rc<RefCell<Environment<'a>>>,
   function: Option<FunctionValue<'a>>,
   block: Option<BasicBlock<'a>>,
   functions: HashMap<&'a str, FunctionSignature<'a>>,
@@ -120,7 +120,6 @@ impl<'a> Compiler<'a> {
       arguments,
       return_type,
     };
-    self.functions.insert(name, signature.clone()); // I don't have any ideas how to remove clone here
     Ok(signature)
   }
   pub fn load_signature(
@@ -129,9 +128,9 @@ impl<'a> Compiler<'a> {
   ) -> Result<FunctionValue<'a>, String> {
     let mut patched_arguments = vec![];
     for argument in &signature.arguments {
-      patched_arguments.push(self.patch_type(argument.0.to_string().as_str())?)
+      patched_arguments.push(argument.0.to_base_type_enum(self.context))
     }
-    let return_type = self.patch_type(signature.return_type.to_string().as_str())?;
+    let return_type = signature.return_type.to_base_type_enum(self.context);
     let fn_type = return_type.fn_type(patched_arguments.as_slice(), false);
     Ok(self.module.add_function(signature.name, fn_type, None))
   }
@@ -186,68 +185,46 @@ impl<'a> Compiler<'a> {
     Ok(())
   }
 
-  pub fn patch_type(&self, string: &str) -> Result<BasicTypeEnum<'a>, String> {
-    match string {
-      "boolean" => Ok(BasicTypeEnum::IntType(self.context.bool_type())),
-      "i8" => Ok(BasicTypeEnum::IntType(self.context.i8_type())),
-      "i16" => Ok(BasicTypeEnum::IntType(self.context.i16_type())),
-      "i32" => Ok(BasicTypeEnum::IntType(self.context.i32_type())),
-      "i64" => Ok(BasicTypeEnum::IntType(self.context.i64_type())),
-      "i128" => Ok(BasicTypeEnum::IntType(self.context.i128_type())),
-      "f16" => Ok(BasicTypeEnum::FloatType(self.context.f16_type())),
-      "f32" => Ok(BasicTypeEnum::FloatType(self.context.f32_type())),
-      "f64" => Ok(BasicTypeEnum::FloatType(self.context.f64_type())),
-      "f128" => Ok(BasicTypeEnum::FloatType(self.context.f64_type())),
-      _ => Err("User defined types not supported now".into()),
-    }
-  }
 
   pub fn compile_node(&mut self, node: Node<'a>) -> Result<Option<Variable<'a>>, String> {
     match node {
       Node::Identifier(id) => {
-        let mut value = if let Ok(value) = self.environment.borrow_mut().get(id) {
-          *value
-        } else {
-          let value = self
-            .named_values
-            .get(id)
-            .ok_or(format!("Unknown variable {}", id))?;
-          Variable::build_const(*value)
-        };
-        if let Some((ptr, ptr_type)) = value.value.as_pointer() {
-          value = load_ptr!(ptr_type, ptr, self);
+        let mut variable = self.environment.borrow().get(id)?;
+        if let Some((ptr, ptr_type)) = variable.value.as_pointer() {
+          variable = load_ptr!(ptr_type, ptr, self);
         }
-        Ok(Some(value))
+        Ok(Some(variable))
       }
-      Node::Integer(integer) => Ok(Some(Variable::build_const(Value::I32(
+      Node::Integer(integer) => expr_value!(Variable::build_const(Value::I32(
         self
           .context
           .i32_type()
           .const_int_from_string(integer, StringRadix::Decimal)
           .ok_or("Invalid integer")?,
-      )))),
-      Node::Float(float) => Ok(Some(Variable::build_const(Value::F64(
+      ))),
+      Node::Float(float) => expr_value!(Variable::build_const(Value::F64(
         self.context.f64_type().const_float_from_string(float),
-      )))),
-      Node::Expression(expression) => Ok(Some(Variable::build_const(
+      ))),
+      Node::Expression(expression) => expr_value!(Variable::build_const(
         self.compile_expression(expression)?,
+      )),
+      Node::Boolean(boolean) => expr_value!(Variable::build_const(Value::Boolean(
+        self.context.bool_type().const_int(boolean as u64, false),
       ))),
       Node::Statement(statement) => {
         self.compile_statement(statement)?;
-        Ok(None)
+        none!()
       }
       Node::Block(body) => {
         let old_env = Rc::clone(&self.environment);
-        self.environment = Rc::new(RefCell::new(Environment::new(Some(Rc::clone(&old_env)))));
+        self.environment = Rc::new(RefCell::new(Environment::new(Some(Rc::clone(&self.environment)))));
         for node in body {
           self.compile_node(node)?;
         }
         self.environment = old_env;
-        Ok(None)
+        none!()
       }
-      Node::Boolean(boolean) => Ok(Some(Variable::build_const(Value::Boolean(
-        self.context.bool_type().const_int(boolean as u64, false),
-      )))),
+
     }
   }
   pub fn compile_statement(&mut self, statement: Statement<'a>) -> Result<(), String> {
@@ -323,9 +300,9 @@ impl<'a> Compiler<'a> {
             }
           }
           let pointer = self.builder.build_alloca(
-            self.patch_type(&value_type.to_string())?,
+            value_type.to_base_type_enum(self.context),
             format!("{}_alloca", id).as_str(),
-          ); // TODO: REFACTOR PATCH_TYPE
+          );
           self
             .builder
             .build_store(pointer, BasicValueEnum::from(value));
@@ -342,14 +319,14 @@ impl<'a> Compiler<'a> {
   }
   pub fn compile_expression(&mut self, expression: Expression<'a>) -> Result<Value<'a>, String> {
     match expression {
-      // TODO!!!: REFACTOR THIS SHIT
       Expression::Binary { operator, lhs, rhs } => {
         if operator == Operator::Assignment {
-          let id = *(lhs.as_identifier().ok_or("Not id")?);
-          let env_clone = Rc::clone(&self.environment);
-          let mut env = env_clone.borrow_mut();
-          let env_clone2 = env.clone();
-          let variable = env_clone2.get(id)?;
+          let id = *(lhs
+            .as_identifier()
+            .ok_or("Not identifier in left side of Assignment")?);
+          let env = Rc::clone(&self.environment);
+          let mut env = env.borrow_mut();
+          let variable = env.get(id)?;
           if !variable.mutable {
             return Err("Can't change immutable variable".to_string());
           }
@@ -357,17 +334,15 @@ impl<'a> Compiler<'a> {
           let pointer = variable.value.as_pointer().unwrap();
           self.builder.build_free(*(pointer.0));
           let new_pointer = self.builder.build_alloca(
-            self.patch_type(pointer.1.to_string().as_str())?,
+            pointer.1.to_base_type_enum(self.context),
             format!("changed_{}_alloca", id).as_str(),
           );
           self
             .builder
             .build_store(new_pointer, BasicValueEnum::from(value));
-          env.set(
-            id,
-            Variable::new(true, Value::Pointer(new_pointer, *(pointer.1))),
-          );
-          Ok(Value::Pointer(new_pointer, *(pointer.1)))
+          let pointer = Value::Pointer(new_pointer, *(pointer.1));
+          env.set(id, Variable::new(true, pointer));
+          Ok(pointer)
         } else {
           let lhs = self.compile_node(*lhs)?.unwrap().value;
           let rhs = self.compile_node(*rhs)?.unwrap().value;
@@ -456,9 +431,6 @@ impl<'a> Compiler<'a> {
         }
       }
       Expression::Call { name, arguments } => {
-        let name = (*name)
-          .as_identifier()
-          .ok_or("Function name not identifier")?;
         let function = self
           .module
           .get_function(name)
@@ -468,10 +440,6 @@ impl<'a> Compiler<'a> {
           Ordering::Less => Err("Don't enough arguments".to_string()),
           Ordering::Greater => Err("Too much arguments".to_string()),
           Ordering::Equal => {
-            let mut functions = self.functions.clone(); // REMOVE CLONE HERE
-            let function_metadata = functions
-              .get_mut(name)
-              .ok_or(format!("Can't find function metadata for {}", name))?;
             let mut value_arguments = Vec::with_capacity(arguments.len());
             for argument in arguments {
               value_arguments.push(
@@ -480,6 +448,11 @@ impl<'a> Compiler<'a> {
                   .ok_or("Node compilation returned None")?,
               );
             }
+            let function_metadata = self
+              .functions
+              .get_mut(name)
+              .ok_or(format!("Can't find function metadata for {}", name))?;
+
             let mut compiled_arguments = vec![];
             for (index, value) in value_arguments.iter().enumerate() {
               let value = value.value;
@@ -545,6 +518,8 @@ mod tests {
     fpm.initialize();
     let mut compiler = Compiler::new(&context, build, module, fpm);
     compiler.compile(top_level).unwrap();
+    println!("{}", compiler.module().print_to_string().to_string());
+    println!("{}", bytecode);
     assert_eq!(
       compiler.module().print_to_string().to_string().as_str(),
       format!(
@@ -669,5 +644,43 @@ main:
 }
 "#,
     )
+  }
+  #[test]
+  fn can_compile_if_statement() {
+  check(r#"
+  function mod(a : i32, b : i32) -> i32 {
+    if a > b {
+      return mod(a - b, b);
+    }
+    return a;
+  }
+  "#, r#"
+define i32 @mod(i32 %a, i32 %b) {
+mod:
+  %load_0_ptr = alloca i32, align 4
+  store i32 %a, i32* %load_0_ptr, align 4
+  %load_1_ptr = alloca i32, align 4
+  store i32 %b, i32* %load_1_ptr, align 4
+  %i32_load = load i32, i32* %load_0_ptr, align 4
+  %i32_load1 = load i32, i32* %load_1_ptr, align 4
+  %sgt_cmp = icmp sgt i32 %i32_load, %i32_load1
+  br i1 %sgt_cmp, label %then, label %else
+
+then:                                             ; preds = %mod
+  %i32_load2 = load i32, i32* %load_0_ptr, align 4
+  %i32_load3 = load i32, i32* %load_1_ptr, align 4
+  %sub = sub i32 %i32_load2, %i32_load3
+  %i32_load4 = load i32, i32* %load_1_ptr, align 4
+  %mod_call = call i32 @mod(i32 %sub, i32 %i32_load4)
+  ret i32 %mod_call
+
+else:                                             ; preds = %mod
+  br label %continue
+
+continue:                                         ; preds = %else
+  %i32_load5 = load i32, i32* %load_0_ptr, align 4
+  ret i32 %i32_load5
+}
+"#);
   }
 }

@@ -1,6 +1,6 @@
 use crate::value::Value;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Variable<'a> {
   pub(crate) mutable: bool,
   pub(crate) value: Value<'a>,

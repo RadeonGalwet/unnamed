@@ -17,7 +17,9 @@ function main() {
 ## To Do
 
 - [ ] Support to unsigned integers
+- [x] REFACTOR COMPILER!!!
 - [x] Conditional statements
-- [ ] Tests for compiler
+- [x] Tests for compiler
+- [ ] Parser tests
 - [ ] Support to void types & functions without return
 - [ ] Extern blocks

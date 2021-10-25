@@ -1,3 +1,5 @@
+use inkwell::{context::Context, types::BasicTypeEnum};
+
 use crate::value::Value;
 
 enum BaseType {
@@ -34,6 +36,24 @@ pub enum Type {
   F64,
   F128,
   Pointer,
+}
+
+impl Type {
+  pub fn to_base_type_enum<'a>(&self, context: &'a Context) -> BasicTypeEnum<'a> {
+    match self {
+        Type::Boolean => BasicTypeEnum::IntType(context.bool_type()),
+        Type::I8 => BasicTypeEnum::IntType(context.i8_type()),
+        Type::I16 => BasicTypeEnum::IntType(context.i16_type()),
+        Type::I32 => BasicTypeEnum::IntType(context.i32_type()),
+        Type::I64 => BasicTypeEnum::IntType(context.i64_type()),
+        Type::I128 => BasicTypeEnum::IntType(context.i128_type()),
+        Type::F16 => BasicTypeEnum::FloatType(context.f16_type()),
+        Type::F32 => BasicTypeEnum::FloatType(context.f32_type()),
+        Type::F64 => BasicTypeEnum::FloatType(context.f64_type()),
+        Type::F128 => BasicTypeEnum::FloatType(context.f128_type()),
+        Type::Pointer => panic!("Not supported now"),
+    }
+  }
 }
 
 impl<'a> From<&Value<'a>> for Type {

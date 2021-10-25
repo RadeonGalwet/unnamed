@@ -258,10 +258,11 @@ impl<'a> Parser<'a> {
         self.source.consume(TokenKind::RightParentheses)?;
         if lhs.as_identifier().is_some() {
           lhs = Node::Expression(Expression::Call {
-            name: Box::new(lhs),
+            name: next_token.value,
             arguments,
           })
         }
+        continue;
       }
       break;
     }
@@ -289,7 +290,7 @@ impl<'a> Parser<'a> {
   }
   pub fn postfix_binding_power(operator: &TokenKind) -> Option<(u8, ())> {
     match operator {
-      TokenKind::LeftParentheses => Some((5, ())),
+      TokenKind::LeftParentheses => Some((10, ())),
       _ => None,
     }
   }

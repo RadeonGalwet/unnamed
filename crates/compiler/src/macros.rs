@@ -165,3 +165,14 @@ macro_rules! load_ptr {
     })
   };
 }
+
+macro_rules! expr_value {
+  ($value: expr) => {
+    Ok(Some($value))
+  };
+}
+macro_rules! none {
+  () => {
+    Ok(None)
+  };
+}

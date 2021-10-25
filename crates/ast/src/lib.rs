@@ -64,7 +64,7 @@ pub enum Expression<'a> {
     argument: Box<Node<'a>>,
   },
   Call {
-    name: Box<Node<'a>>,
+    name: &'a str,
     arguments: Vec<Node<'a>>,
   },
 }
