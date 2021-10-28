@@ -1,4 +1,4 @@
-use crate::r#type::Type;
+use crate::type_system::r#type::Type;
 
 #[derive(Debug, Clone)]
 pub struct FunctionSignature<'a> {

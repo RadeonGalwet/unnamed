@@ -3,7 +3,7 @@
 ## Examples
 
 ```js
-function sum(a: int32, b: int32) -> int64 = (a + b) -> int64;
+function sum(a: int16, b: int16) -> int64 = (a + b) -> int64;
 function main() {
   let result = sum(1, 2);
   print(result);
@@ -13,7 +13,7 @@ function main() {
 ## To Do
 
 - [ ] Support to unsigned integers
-- [x] REFACTOR COMPILER!!!
+- [ ] Refactor type system
 - [x] Conditional statements
 - [x] Tests for compiler
 - [ ] Parser tests

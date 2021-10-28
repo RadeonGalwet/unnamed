@@ -1,7 +1,7 @@
 use enum_as_inner::EnumAsInner;
 use inkwell::values::{BasicValueEnum, FloatValue, IntValue, PointerValue};
 
-use crate::r#type::Type;
+use crate::type_system::r#type::Type;
 
 #[derive(Debug, EnumAsInner, Clone, Copy)]
 pub enum Value<'a> {

@@ -3,7 +3,7 @@ pub mod macros;
 pub mod env;
 pub mod function_signature;
 pub mod state;
-pub mod r#type;
+pub mod type_system;
 pub mod value;
 pub mod variable;
 
@@ -23,10 +23,14 @@ use inkwell::{
   FloatPredicate, IntPredicate,
 };
 use state::State;
+use type_system::TypeSystem;
 use value::Value;
 use variable::Variable;
 
-use crate::r#type::{BaseType, Type as RuntimeType};
+use crate::type_system::{
+  infer_result::InferResult,
+  r#type::{BaseType, Type as RuntimeType},
+};
 
 pub struct Compiler<'a> {
   context: &'a Context,
@@ -37,6 +41,7 @@ pub struct Compiler<'a> {
   function: Option<FunctionValue<'a>>,
   block: Option<BasicBlock<'a>>,
   functions: HashMap<&'a str, FunctionSignature<'a>>,
+  system: TypeSystem<'a>,
   state: State,
 }
 
@@ -55,6 +60,7 @@ impl<'a> Compiler<'a> {
       state: State::default(),
       environment: Rc::new(RefCell::new(Environment::new(None))),
       functions: HashMap::new(),
+      system: TypeSystem::new(),
       function: None,
       block: None,
     }
@@ -285,16 +291,15 @@ impl<'a> Compiler<'a> {
         init_type,
       } => {
         if let Some(init) = init {
-          let value = self.compile_node(*init)?.unwrap().value;
+          let mut value = self.compile_node(*init)?.unwrap().value;
           let value_type = RuntimeType::from(value);
           if let Some(init_type) = init_type {
             let init_type = RuntimeType::from(init_type);
-            if init_type != value_type {
-              return Err(format!(
-                "type '{}' is not assignable to type '{}'",
-                init_type.to_string(),
-                value_type.to_string()
-              ));
+            self.system.set(id, init_type);
+            let result = self.system.infer(value_type, init_type)?;
+            match result {
+              InferResult::Cast(cast) => value = self.build_cast(value, cast)?,
+              InferResult::Success(_) => {}
             }
           }
           let pointer = self.builder.build_alloca(
@@ -342,8 +347,18 @@ impl<'a> Compiler<'a> {
           env.set(id, Variable::new(true, pointer));
           Ok(pointer)
         } else {
-          let lhs = self.compile_node(*lhs)?.unwrap().value;
-          let rhs = self.compile_node(*rhs)?.unwrap().value;
+          let mut lhs = self.compile_node(*lhs)?.unwrap().value;
+          let mut rhs = self.compile_node(*rhs)?.unwrap().value;
+          let result = self
+            .system
+            .infer(RuntimeType::from(lhs), RuntimeType::from(rhs))?;
+          match result {
+            InferResult::Cast(cast) => {
+              lhs = self.build_cast(lhs, cast)?;
+              rhs = self.build_cast(rhs, cast)?;
+            }
+            InferResult::Success(_) => {}
+          }
           match (lhs, rhs) {
             (Value::Boolean(lhs), Value::Boolean(rhs)) => Ok(Value::Boolean(match operator {
               Operator::Equal => {
@@ -440,28 +455,22 @@ impl<'a> Compiler<'a> {
           Ordering::Equal => {
             let mut value_arguments = Vec::with_capacity(arguments.len());
             for argument in arguments {
-              value_arguments.push(
-                self
-                  .compile_node(argument)?
-                  .ok_or("Node compilation returned None")?,
-              );
+              let value = self
+                .compile_node(argument)?
+                .ok_or("Node compilation returned None")?
+                .value;
+              value_arguments.push(value);
             }
-            let function_metadata = self
-              .functions
-              .get_mut(name)
-              .ok_or(format!("Can't find function metadata for {}", name))?;
 
             let mut compiled_arguments = vec![];
             for (index, value) in value_arguments.iter().enumerate() {
-              let value = value.value;
-              let value_type = RuntimeType::from(value);
+              let function_metadata = self
+                .functions
+                .get_mut(name)
+                .ok_or(format!("Can't find function metadata for {}", name))?;
+
               let expected_type = function_metadata.arguments[index];
-              if value_type != expected_type.0 {
-                return Err(format!(
-                  "Expected {:?} type, found {:?}",
-                  expected_type, value
-                ));
-              }
+              let value = self.build_cast(*value, expected_type.0)?;
 
               compiled_arguments.push(BasicValueEnum::from(value));
             }
@@ -474,6 +483,11 @@ impl<'a> Compiler<'a> {
               .try_as_basic_value()
               .left()
               .ok_or("Void don't supported")?;
+            let function_metadata = self
+              .functions
+              .get_mut(name)
+              .ok_or(format!("Can't find function metadata for {}", name))?;
+
             match function_metadata.return_type {
               RuntimeType::Boolean => Ok(Value::Boolean(value.into_int_value())),
               RuntimeType::I8 => Ok(Value::I8(value.into_int_value())),
@@ -495,52 +509,59 @@ impl<'a> Compiler<'a> {
       }
       Expression::Cast { value, to } => {
         let value = self.compile_node(*value)?.unwrap().value;
-        let value_type = RuntimeType::from(value);
         let cast_type = RuntimeType::from(to);
-        match (BaseType::from(value_type), BaseType::from(cast_type)) {
-          (BaseType::Float, BaseType::Float) => match value_type.size().cmp(&cast_type.size()) {
-            Ordering::Greater => cast_type.new_float(self.builder.build_float_trunc(
-              BasicValueEnum::from(value).into_float_value(),
-              cast_type.to_base_type_enum(self.context).into_float_type(),
-              "float_downcast",
-            )),
-            Ordering::Less => cast_type.new_float(self.builder.build_float_ext(
-              BasicValueEnum::from(value).into_float_value(),
-              cast_type.to_base_type_enum(self.context).into_float_type(),
-              "float_upcast",
-            )),
-            Ordering::Equal => Ok(value),
-          },
-          (BaseType::Float, BaseType::Integer) => {
-            cast_type.new_int(self.builder.build_float_to_signed_int(
-              BasicValueEnum::from(value).into_float_value(),
-              cast_type.to_base_type_enum(self.context).into_int_type(),
-              "float_to_int_cast",
-            ))
-          }
-          (BaseType::Integer, BaseType::Float) => {
-            cast_type.new_float(self.builder.build_signed_int_to_float(
-              BasicValueEnum::from(value).into_int_value(),
-              cast_type.to_base_type_enum(self.context).into_float_type(),
-              "int_to_float_cast",
-            ))
-          }
-          (BaseType::Integer, BaseType::Integer) => match value_type.size().cmp(&cast_type.size()) {
-            Ordering::Greater => cast_type.new_int(self.builder.build_int_z_extend(
-              BasicValueEnum::from(value).into_int_value(),
-              cast_type.to_base_type_enum(self.context).into_int_type(),
-              "integer_downcast",
-            )),
-            Ordering::Less => cast_type.new_int(self.builder.build_int_s_extend(
-              BasicValueEnum::from(value).into_int_value(),
-              cast_type.to_base_type_enum(self.context).into_int_type(),
-              "integer_upcast",
-            )),
-            Ordering::Equal => Ok(value),
-          },
-          _ => Err("Unknown cast".into())
-        }
+        self.build_cast(value, cast_type)
       }
+    }
+  }
+  pub fn build_cast(
+    &mut self,
+    value: Value<'a>,
+    cast_type: RuntimeType,
+  ) -> Result<Value<'a>, String> {
+    let value_type = RuntimeType::from(value);
+    match (BaseType::from(value_type), BaseType::from(cast_type)) {
+      (BaseType::Float, BaseType::Float) => match value_type.size().cmp(&cast_type.size()) {
+        Ordering::Greater => cast_type.new_float(self.builder.build_float_trunc(
+          BasicValueEnum::from(value).into_float_value(),
+          cast_type.to_base_type_enum(self.context).into_float_type(),
+          "float_downcast",
+        )),
+        Ordering::Less => cast_type.new_float(self.builder.build_float_ext(
+          BasicValueEnum::from(value).into_float_value(),
+          cast_type.to_base_type_enum(self.context).into_float_type(),
+          "float_upcast",
+        )),
+        Ordering::Equal => Ok(value),
+      },
+      (BaseType::Float, BaseType::Integer) => {
+        cast_type.new_int(self.builder.build_float_to_signed_int(
+          BasicValueEnum::from(value).into_float_value(),
+          cast_type.to_base_type_enum(self.context).into_int_type(),
+          "float_to_int_cast",
+        ))
+      }
+      (BaseType::Integer, BaseType::Float) => {
+        cast_type.new_float(self.builder.build_signed_int_to_float(
+          BasicValueEnum::from(value).into_int_value(),
+          cast_type.to_base_type_enum(self.context).into_float_type(),
+          "int_to_float_cast",
+        ))
+      }
+      (BaseType::Integer, BaseType::Integer) => match value_type.size().cmp(&cast_type.size()) {
+        Ordering::Greater => cast_type.new_int(self.builder.build_int_z_extend(
+          BasicValueEnum::from(value).into_int_value(),
+          cast_type.to_base_type_enum(self.context).into_int_type(),
+          "integer_downcast",
+        )),
+        Ordering::Less => cast_type.new_int(self.builder.build_int_s_extend(
+          BasicValueEnum::from(value).into_int_value(),
+          cast_type.to_base_type_enum(self.context).into_int_type(),
+          "integer_upcast",
+        )),
+        Ordering::Equal => Ok(value),
+      },
+      _ => Err("Unknown cast".into()),
     }
   }
   pub fn module(&self) -> &Module<'a> {
