@@ -1,8 +1,10 @@
-use std::ops::Range;
+pub mod range;
+
 
 use logos::{Lexer as LogosLexer, Logos};
+use range::Range;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Token<'a> {
   pub value: &'a str,
   pub kind: TokenKind,
@@ -25,7 +27,10 @@ impl<'a> Lexer<'a> {
     let kind = self.inner.next()?;
     let value = self.inner.slice();
     let range = self.inner.span();
-    Some(Token { kind, value, range })
+    Some(Token { kind, value, range: Range {
+      start: range.start,
+      end: range.end
+    } })
   }
 }
 

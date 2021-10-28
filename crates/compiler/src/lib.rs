@@ -26,7 +26,7 @@ use state::State;
 use value::Value;
 use variable::Variable;
 
-use crate::r#type::Type as RuntimeType;
+use crate::r#type::{BaseType, Type as RuntimeType};
 
 pub struct Compiler<'a> {
   context: &'a Context,
@@ -183,7 +183,6 @@ impl<'a> Compiler<'a> {
     Ok(())
   }
 
-
   pub fn compile_node(&mut self, node: Node<'a>) -> Result<Option<Variable<'a>>, String> {
     match node {
       Node::Identifier(id) => {
@@ -203,9 +202,9 @@ impl<'a> Compiler<'a> {
       Node::Float(float) => expr_value!(Variable::build_const(Value::F64(
         self.context.f64_type().const_float_from_string(float),
       ))),
-      Node::Expression(expression) => expr_value!(Variable::build_const(
-        self.compile_expression(expression)?,
-      )),
+      Node::Expression(expression) => {
+        expr_value!(Variable::build_const(self.compile_expression(expression)?,))
+      }
       Node::Boolean(boolean) => expr_value!(Variable::build_const(Value::Boolean(
         self.context.bool_type().const_int(boolean as u64, false),
       ))),
@@ -215,14 +214,15 @@ impl<'a> Compiler<'a> {
       }
       Node::Block(body) => {
         let old_env = Rc::clone(&self.environment);
-        self.environment = Rc::new(RefCell::new(Environment::new(Some(Rc::clone(&self.environment)))));
+        self.environment = Rc::new(RefCell::new(Environment::new(Some(Rc::clone(
+          &self.environment,
+        )))));
         for node in body {
           self.compile_node(node)?;
         }
         self.environment = old_env;
         none!()
       }
-
     }
   }
   pub fn compile_statement(&mut self, statement: Statement<'a>) -> Result<(), String> {
@@ -493,6 +493,54 @@ impl<'a> Compiler<'a> {
           }
         }
       }
+      Expression::Cast { value, to } => {
+        let value = self.compile_node(*value)?.unwrap().value;
+        let value_type = RuntimeType::from(value);
+        let cast_type = RuntimeType::from(to);
+        match (BaseType::from(value_type), BaseType::from(cast_type)) {
+          (BaseType::Float, BaseType::Float) => match value_type.size().cmp(&cast_type.size()) {
+            Ordering::Greater => cast_type.new_float(self.builder.build_float_trunc(
+              BasicValueEnum::from(value).into_float_value(),
+              cast_type.to_base_type_enum(self.context).into_float_type(),
+              "float_downcast",
+            )),
+            Ordering::Less => cast_type.new_float(self.builder.build_float_ext(
+              BasicValueEnum::from(value).into_float_value(),
+              cast_type.to_base_type_enum(self.context).into_float_type(),
+              "float_upcast",
+            )),
+            Ordering::Equal => Ok(value),
+          },
+          (BaseType::Float, BaseType::Integer) => {
+            cast_type.new_int(self.builder.build_float_to_signed_int(
+              BasicValueEnum::from(value).into_float_value(),
+              cast_type.to_base_type_enum(self.context).into_int_type(),
+              "float_to_int_cast",
+            ))
+          }
+          (BaseType::Integer, BaseType::Float) => {
+            cast_type.new_float(self.builder.build_signed_int_to_float(
+              BasicValueEnum::from(value).into_int_value(),
+              cast_type.to_base_type_enum(self.context).into_float_type(),
+              "int_to_float_cast",
+            ))
+          }
+          (BaseType::Integer, BaseType::Integer) => match value_type.size().cmp(&cast_type.size()) {
+            Ordering::Greater => cast_type.new_int(self.builder.build_int_z_extend(
+              BasicValueEnum::from(value).into_int_value(),
+              cast_type.to_base_type_enum(self.context).into_int_type(),
+              "integer_downcast",
+            )),
+            Ordering::Less => cast_type.new_int(self.builder.build_int_s_extend(
+              BasicValueEnum::from(value).into_int_value(),
+              cast_type.to_base_type_enum(self.context).into_int_type(),
+              "integer_upcast",
+            )),
+            Ordering::Equal => Ok(value),
+          },
+          _ => Err("Unknown cast".into())
+        }
+      }
     }
   }
   pub fn module(&self) -> &Module<'a> {
@@ -643,14 +691,16 @@ main:
   }
   #[test]
   fn can_compile_if_statement() {
-  check(r#"
+    check(
+      r#"
   function mod(a: int32, b: int32) -> int32 {
     if a > b {
       return mod(a - b, b);
     }
     return a;
   }
-  "#, r#"
+  "#,
+      r#"
 define i32 @mod(i32 %a, i32 %b) {
 mod:
   %load_0_ptr = alloca i32, align 4
@@ -677,6 +727,7 @@ continue:                                         ; preds = %else
   %i32_load5 = load i32, i32* %load_0_ptr, align 4
   ret i32 %i32_load5
 }
-"#);
+"#,
+    );
   }
 }

@@ -3,14 +3,10 @@
 ## Examples
 
 ```js
-function sum(a: int32, b: int32) -> int32 = a + b;
+function sum(a: int32, b: int32) -> int64 = (a + b) -> int64;
 function main() {
   let result = sum(1, 2);
-  if result == 3 {
-    print("result == 3");
-  } else {
-    print("result != 3");
-  }
+  print(result);
 }
 ```
 

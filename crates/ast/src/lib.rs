@@ -67,6 +67,10 @@ pub enum Expression<'a> {
     name: &'a str,
     arguments: Vec<Node<'a>>,
   },
+  Cast {
+    value: Box<Node<'a>>,
+    to: &'a str
+  }
 }
 
 #[derive(Debug, PartialEq)]

@@ -204,6 +204,7 @@ impl<'a> Parser<'a> {
       TokenKind::False => Node::Boolean(false),
 
       TokenKind::LeftParentheses => {
+        println!("какого хуя 2");
         let expression = self.parse_expression_with_binding_power(0)?;
         self.source.consume(TokenKind::RightParentheses)?;
         expression
@@ -214,7 +215,7 @@ impl<'a> Parser<'a> {
     loop {
       let peek = self.source.peek();
       let token = match peek {
-        Ok(token) => token,
+        Ok(token) => *token,
         Err(_) => break,
       };
       if let Some((left_binding_power, right_binding_power)) =
@@ -248,19 +249,31 @@ impl<'a> Parser<'a> {
           operator,
         });
         continue;
-      }
-      if let Some((left_binding_power, ())) = Self::postfix_binding_power(&token.kind) {
+      } else if let Some((left_binding_power, ())) = Self::postfix_binding_power(&token.kind) {
         if left_binding_power < minimal_binding_power {
           break;
         }
         self.source.next_token()?;
-        let arguments = self.arguments(|parser| parser.parse_expression(), None)?;
-        self.source.consume(TokenKind::RightParentheses)?;
-        if lhs.as_identifier().is_some() {
-          lhs = Node::Expression(Expression::Call {
-            name: next_token.value,
-            arguments,
-          })
+        match token.kind {
+          TokenKind::LeftParentheses => {
+            let arguments = self.arguments(|parser| parser.parse_expression(), None)?;
+            self.source.consume(TokenKind::RightParentheses)?;
+            if lhs.as_identifier().is_some() {
+              lhs = Node::Expression(Expression::Call {
+                name: next_token.value,
+                arguments,
+              })
+            }
+          },
+          TokenKind::Arrow => {
+            let rhs = self.parse_expression()?;
+            let to = *(rhs.as_identifier().ok_or("Left side of cast expression not identifier")?);
+            lhs = Node::Expression(Expression::Cast {
+              to,
+              value: Box::new(lhs)
+            })
+          }
+          _ => return Err("Error".to_string())
         }
         continue;
       }
@@ -291,6 +304,7 @@ impl<'a> Parser<'a> {
   pub fn postfix_binding_power(operator: &TokenKind) -> Option<(u8, ())> {
     match operator {
       TokenKind::LeftParentheses => Some((10, ())),
+      TokenKind::Arrow => Some((9, ())),
       _ => None,
     }
   }
