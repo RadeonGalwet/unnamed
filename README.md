@@ -1,5 +1,7 @@
 # Unnamed Language
 
+Currently being rewritten from scratch
+
 ## Examples
 
 ```js
