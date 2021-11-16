@@ -47,4 +47,3 @@ jobs:
           command: clippy
           args: -- -D warnings
 
-- uses: Swatinem/rust-cache@v1
