@@ -1,3 +1,4 @@
 /target
 /crates/compiler/src/main.rs
 /crates/parser/src/main.rs
+/crates/vm/src/main.rs
