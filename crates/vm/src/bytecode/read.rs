@@ -14,12 +14,12 @@ where
 {
   fn read_opcode(&mut self) -> Result<Opcode> {
     match self.read_byte()? {
-      0b0 => Ok(Opcode::Halt),
-      0b1 => Ok(Opcode::PushInt),
-      0b10 => Ok(Opcode::AddInt),
-      0b11 => Ok(Opcode::SubInt),
-      0b100 => Ok(Opcode::MulInt),
-      0b101 => Ok(Opcode::DivInt),
+      0x0 => Ok(Opcode::Halt),
+      0x1 => Ok(Opcode::PushInt),
+      0x2 => Ok(Opcode::AddInt),
+      0x3 => Ok(Opcode::SubInt),
+      0x4 => Ok(Opcode::MulInt),
+      0x5 => Ok(Opcode::DivInt),
       _ => Err(Error::new(ErrorKind::InvalidData, "Unknown opcode")),
     }
   }
