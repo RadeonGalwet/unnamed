@@ -21,14 +21,14 @@ impl<'a> Lexer<'a> {
   }
   pub fn skip(&mut self) -> Result<(), LexingError> {
     while !self.cursor.eof() && (self.cursor.peek()? == '\n' || self.cursor.peek()? == ' ') {
-      self.cursor.next()?;
+      self.cursor.next_char()?;
     }
     self.cursor.clear_span();
     Ok(())
   }
   pub fn is_id_start(&mut self) -> Result<bool, LexingError> {
     let char = self.cursor.peek()?;
-    Ok('a' <= char && char <= 'z' || 'A' <= char && char <= 'Z' || char == '_' || char == '$')
+    Ok(('a'..='z').contains(&char) || ('A'..='Z').contains(&char) || char == '_' || char == '$')
   }
   pub fn is_id(&mut self) -> Result<bool, LexingError> {
     Ok(self.is_id_start()? || self.is_number_start()?)
@@ -46,7 +46,7 @@ impl<'a> Lexer<'a> {
     self.test(|lexer| lexer.is_id_start())?;
 
     while !self.cursor.eof() && self.is_id()? {
-      self.cursor.next()?;
+      self.cursor.next_char()?;
     }
     let span = self.cursor.span();
     self.cursor.clear_span();
@@ -57,7 +57,7 @@ impl<'a> Lexer<'a> {
     F: Fn(&mut Self) -> Result<bool, LexingError>,
   {
     if check(self)? {
-      self.cursor.next()?;
+      self.cursor.next_char()?;
       Ok(())
     } else {
       Err(LexingError::new(
@@ -66,10 +66,10 @@ impl<'a> Lexer<'a> {
       ))
     }
   }
-  pub fn read_number(&mut self) -> Result<Token, LexingError> {
+  pub(crate) fn read_number(&mut self) -> Result<Token, LexingError> {
     self.test(|lexer| lexer.is_number_start())?;
     let mut is_float = false;
-    let mut has_error = false; // Hack for full token read
+    let mut has_error = false; 
     while !self.cursor.eof() && self.is_number()? {
       if self.cursor.peek()? == '.' {
         if is_float {
@@ -77,7 +77,7 @@ impl<'a> Lexer<'a> {
         }
         is_float = true
       }
-      self.cursor.next()?;
+      self.cursor.next_char()?;
     }
     if has_error {
       return Err(LexingError::new(
@@ -96,7 +96,7 @@ impl<'a> Lexer<'a> {
     }
   }
   pub fn consume(&mut self, char: char) -> Result<(), LexingError> {
-    if !(self.cursor.next()? == char) {
+    if self.cursor.next_char()? != char {
       Err(LexingError::new(LexingErrorKind::UnexpectedToken, self.cursor.span()))
     } else {
       Ok(())
@@ -118,7 +118,7 @@ impl<'a> Lexer<'a> {
     }
   }
   pub fn read_single_char(&mut self) -> Result<Token, LexingError> {
-    let token = match self.cursor.next()? {
+    let token = match self.cursor.next_char()? {
       '+' => Ok(Token::Plus),
       '-' => {
         if self.cursor.lookup(1)? == '>' {
@@ -138,12 +138,12 @@ impl<'a> Lexer<'a> {
       '[' => Ok(Token::LeftSquareBrackets),
       ']' => Ok(Token::RightSquareBrackets),
       '"' => {
-        while self.cursor.next()? != '"' {};
+        while self.cursor.next_char()? != '"' {};
         Ok(Token::String(self.cursor.span().expand(&mut self.cursor)))
       },
       '>' => {
         if self.cursor.lookup(1)? == '=' {
-          self.cursor.next()?;
+          self.cursor.next_char()?;
           Ok(Token::GreeterEqual)
         } else {
           Ok(Token::Greeter)
@@ -151,7 +151,7 @@ impl<'a> Lexer<'a> {
       },
       '<' => {
         if self.cursor.lookup(1)? == '=' {
-          self.cursor.next()?;
+          self.cursor.next_char()?;
           Ok(Token::LessEqual)
         } else {
           Ok(Token::Less)
@@ -159,7 +159,7 @@ impl<'a> Lexer<'a> {
       }
       '=' => {
         if self.cursor.lookup(1)? == '=' {
-          self.cursor.next()?;
+          self.cursor.next_char()?;
           Ok(Token::Equal)
         } else {
           Ok(Token::Assignment)
@@ -183,24 +183,5 @@ impl<'a> Lexer<'a> {
       return self.read_number();
     }
     self.read_single_char()
-  }
-  pub fn run() {
-    let input = r#"
-  public function main() -> integer {
-    let mutable i = 0;
-    while(i < 100) {
-      print("{i}");
-    }
-    print("end");
-  }
-  "#;
-  let mut lexer = Lexer::new(input);
-  while !lexer.cursor.eof() {
-    let token = lexer.next_token().unwrap();
-    // match token {
-    //     Ok(token) => println!("{:?}", token),
-    //     Err(err) => eprintln!("{} at {}:{}\n\ninput = {}", err, err.span.start, err.span.end, &input[err.span.start - 1..err.span.end]),
-    // }
-  }
   }
 }

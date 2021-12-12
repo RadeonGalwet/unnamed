@@ -1,4 +1,4 @@
-use crate::{span::Span, error::{LexingError, LexingErrorKind}, token::Token};
+use crate::{span::Span, error::{LexingError, LexingErrorKind}};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Cursor<'a> {
@@ -15,7 +15,7 @@ impl<'a> Cursor<'a> {
       input,
     }
   }
-  pub fn next(&mut self) -> Result<char, LexingError> {
+  pub fn next_char(&mut self) -> Result<char, LexingError> {
     let char = self.peek()?;
     self.position += 1;
     Ok(char)
@@ -31,13 +31,11 @@ impl<'a> Cursor<'a> {
     }
     if self.position == 0 {
       self.input[0..1]
-        .chars()
-        .nth(0)
+        .chars().next()
         .ok_or_else(|| LexingError::new(LexingErrorKind::UnexpectedEndOfInput, self.span()))
     } else {
       self.input[self.position..self.position + 1]
-        .chars()
-        .nth(0)
+        .chars().next()
         .ok_or_else(|| LexingError::new(LexingErrorKind::UnexpectedEndOfInput, self.span()))
     }
   }
@@ -55,7 +53,7 @@ impl<'a> Cursor<'a> {
     if lookup_position > (self.input.len() - 1) {
       return Err(LexingError::new(LexingErrorKind::UnexpectedEndOfInput, self.span()))
     }
-    Ok(self.input[self.position..self.position + count].chars().nth(0).unwrap())
+    Ok(self.input[self.position..self.position + count].chars().next().unwrap())
   }
   pub fn eof(&self) -> bool {
     self.position > (self.input.chars().count() - 1)
