@@ -10,7 +10,7 @@ pub mod span;
 pub mod token;
 
 pub struct Lexer<'a> {
-  cursor: Cursor<'a>,
+  pub cursor: Cursor<'a>,
 }
 
 impl<'a> Lexer<'a> {
@@ -19,8 +19,8 @@ impl<'a> Lexer<'a> {
       cursor: Cursor::new(input),
     }
   }
-  pub fn skip_whitespaces(&mut self) -> Result<(), LexingError> {
-    while self.cursor.peek()? == ' ' && !self.cursor.eof() {
+  pub fn skip(&mut self) -> Result<(), LexingError> {
+    while !self.cursor.eof() && (self.cursor.peek()? == '\n' || self.cursor.peek()? == ' ') {
       self.cursor.next()?;
     }
     self.cursor.clear_span();
@@ -88,30 +88,83 @@ impl<'a> Lexer<'a> {
     let span = self.cursor.span();
     self.cursor.clear_span();
     let slice = span.expand(&mut self.cursor);
-    
+
     if is_float {
       Ok(Token::Float(slice))
     } else {
       Ok(Token::Integer(slice))
     }
   }
-  pub fn read_single_char(&mut self) -> Result<Token, LexingError> {
-    todo!()
+  pub fn consume(&mut self, char: char) -> Result<(), LexingError> {
+    if !(self.cursor.next()? == char) {
+      Err(LexingError::new(LexingErrorKind::UnexpectedToken, self.cursor.span()))
+    } else {
+      Ok(())
+    }
   }
-  pub fn next_token(&mut self) -> Result<Token, LexingError> {
-    self.skip_whitespaces()?;
-
-    if self.is_id_start()? {
-      return Ok(Token::Identifier(self.read_id()?));
+  pub fn read_keyword(&mut self) -> Result<Token, LexingError> {
+    let id = self.read_id()?;
+    match id {
+      "function" => Ok(Token::Function),
+      "module" => Ok(Token::Module),
+      "public" => Ok(Token::Public),
+      "let" => Ok(Token::Let),
+      "mutable" => Ok(Token::Mutable),
+      "import" => Ok(Token::Import),
+      "while" => Ok(Token::While),
+      "true" => Ok(Token::True),
+      "false" => Ok(Token::False),
+      _ => Ok(Token::Identifier(id))
     }
-    if self.is_number_start()? {
-      return self.read_number();
-    }
+  }
+  pub fn read_single_char(&mut self) -> Result<Token, LexingError> {
     let token = match self.cursor.next()? {
       '+' => Ok(Token::Plus),
-      '-' => Ok(Token::Minus),
+      '-' => {
+        if self.cursor.lookup(1)? == '>' {
+          Ok(Token::Arrow)
+        } else {
+          Ok(Token::Minus)
+        }
+      },
       '*' => Ok(Token::Multiply),
       '/' => Ok(Token::Divide),
+      ':' => Ok(Token::Colon),
+      ';' => Ok(Token::Semicolon),
+      '(' => Ok(Token::LeftRoundBrackets),
+      ')' => Ok(Token::RightRoundBrackets),
+      '{' => Ok(Token::LeftCurlyBrackets),
+      '}' => Ok(Token::RightCurlyBrackets),
+      '[' => Ok(Token::LeftSquareBrackets),
+      ']' => Ok(Token::RightSquareBrackets),
+      '"' => {
+        while self.cursor.next()? != '"' {};
+        Ok(Token::String(self.cursor.span().expand(&mut self.cursor)))
+      },
+      '>' => {
+        if self.cursor.lookup(1)? == '=' {
+          self.cursor.next()?;
+          Ok(Token::GreeterEqual)
+        } else {
+          Ok(Token::Greeter)
+        }
+      },
+      '<' => {
+        if self.cursor.lookup(1)? == '=' {
+          self.cursor.next()?;
+          Ok(Token::LessEqual)
+        } else {
+          Ok(Token::Less)
+        }
+      }
+      '=' => {
+        if self.cursor.lookup(1)? == '=' {
+          self.cursor.next()?;
+          Ok(Token::Equal)
+        } else {
+          Ok(Token::Assignment)
+        }
+      }
       _ => Err(LexingError::new(
         LexingErrorKind::UnexpectedToken,
         self.cursor.span(),
@@ -119,5 +172,35 @@ impl<'a> Lexer<'a> {
     };
     self.cursor.clear_span();
     token
+  }
+  pub fn next_token(&mut self) -> Result<Token, LexingError> {
+    self.skip()?;
+    
+    if self.is_id_start()? {
+      return self.read_keyword()
+    }
+    if self.is_number_start()? {
+      return self.read_number();
+    }
+    self.read_single_char()
+  }
+  pub fn run() {
+    let input = r#"
+  public function main() -> integer {
+    let mutable i = 0;
+    while(i < 100) {
+      print("{i}");
+    }
+    print("end");
+  }
+  "#;
+  let mut lexer = Lexer::new(input);
+  while !lexer.cursor.eof() {
+    let token = lexer.next_token().unwrap();
+    // match token {
+    //     Ok(token) => println!("{:?}", token),
+    //     Err(err) => eprintln!("{} at {}:{}\n\ninput = {}", err, err.span.start, err.span.end, &input[err.span.start - 1..err.span.end]),
+    // }
+  }
   }
 }

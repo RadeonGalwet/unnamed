@@ -1,4 +1,4 @@
-use crate::{span::Span, error::{LexingError, LexingErrorKind}};
+use crate::{span::Span, error::{LexingError, LexingErrorKind}, token::Token};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Cursor<'a> {
@@ -50,7 +50,14 @@ impl<'a> Cursor<'a> {
   pub fn clear_span(&mut self) {
     self.start = self.position;
   }
+  pub fn lookup(&mut self, count: usize) -> Result<char, LexingError> {
+    let lookup_position = self.position + count;
+    if lookup_position > (self.input.len() - 1) {
+      return Err(LexingError::new(LexingErrorKind::UnexpectedEndOfInput, self.span()))
+    }
+    Ok(self.input[self.position..self.position + count].chars().nth(0).unwrap())
+  }
   pub fn eof(&self) -> bool {
-    self.position > (self.input.len() - 1)
+    self.position > (self.input.chars().count() - 1)
   } 
 }
