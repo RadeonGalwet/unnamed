@@ -5,9 +5,9 @@ use token::Token;
 
 pub mod cursor;
 pub mod error;
-pub mod macros;
 pub mod span;
 pub mod token;
+pub mod iterator;
 
 pub struct Lexer<'a> {
   pub cursor: Cursor<'a>,
@@ -66,7 +66,7 @@ impl<'a> Lexer<'a> {
       ))
     }
   }
-  pub(crate) fn read_number(&mut self) -> Result<Token, LexingError> {
+  pub(crate) fn read_number(&mut self) -> Result<Token<'a>, LexingError> {
     self.test(|lexer| lexer.is_number_start())?;
     let mut is_float = false;
     let mut has_error = false; 
@@ -102,7 +102,7 @@ impl<'a> Lexer<'a> {
       Ok(())
     }
   }
-  pub fn read_keyword(&mut self) -> Result<Token, LexingError> {
+  pub fn read_keyword(&mut self) -> Result<Token<'a>, LexingError> {
     let id = self.read_id()?;
     match id {
       "function" => Ok(Token::Function),
@@ -117,7 +117,7 @@ impl<'a> Lexer<'a> {
       _ => Ok(Token::Identifier(id))
     }
   }
-  pub fn read_single_char(&mut self) -> Result<Token, LexingError> {
+  pub fn read_single_char(&mut self) -> Result<Token<'a>, LexingError> {
     let token = match self.cursor.next_char()? {
       '+' => Ok(Token::Plus),
       '-' => {
@@ -173,9 +173,7 @@ impl<'a> Lexer<'a> {
     self.cursor.clear_span();
     token
   }
-  pub fn next_token(&mut self) -> Result<Token, LexingError> {
-    self.skip()?;
-    
+  pub fn next_token(&mut self) -> Result<Token<'a>, LexingError> {    
     if self.is_id_start()? {
       return self.read_keyword()
     }
@@ -183,5 +181,13 @@ impl<'a> Lexer<'a> {
       return self.read_number();
     }
     self.read_single_char()
+  }
+  pub fn next_token_option(&mut self) -> Option<Result<Token<'a>, LexingError>> {
+    self.skip().ok()?;
+    if self.cursor.eof() {
+      None
+    } else {
+      Some(self.next_token())
+    }
   }
 }
