@@ -1,93 +1,96 @@
-#![feature(decl_macro)]
 use cursor::Cursor;
-use error::{LexingError, LexingErrorKind};
 use token::Token;
 
+use crate::common::{
+  error::{Error, ErrorKind},
+  source::Source,
+};
+
 pub mod cursor;
-pub mod error;
-pub mod span;
-pub mod token;
 pub mod iterator;
+pub mod token;
 
 pub struct Lexer<'a> {
   pub cursor: Cursor<'a>,
 }
 
 impl<'a> Lexer<'a> {
-  pub fn new(input: &'a str) -> Self {
+  pub fn new(input: Source<'a>) -> Self {
     Self {
       cursor: Cursor::new(input),
     }
   }
-  pub fn skip(&mut self) -> Result<(), LexingError> {
-    while !self.cursor.eof() && (self.cursor.peek()? == '\n' || self.cursor.peek()? == ' ') {
-      self.cursor.next_char()?;
+  pub fn skip(&mut self) -> Result<(), Error<'a>> {
+    while !self.cursor.eof() && (self.cursor.peek() == '\n' || self.cursor.peek() == ' ') {
+      self.cursor.next_char();
     }
     self.cursor.clear_span();
     Ok(())
   }
-  pub fn is_id_start(&mut self) -> Result<bool, LexingError> {
-    let char = self.cursor.peek()?;
+  pub fn is_id_start(&mut self) -> Result<bool, Error<'a>> {
+    let char = self.cursor.peek();
     Ok(('a'..='z').contains(&char) || ('A'..='Z').contains(&char) || char == '_' || char == '$')
   }
-  pub fn is_id(&mut self) -> Result<bool, LexingError> {
+  pub fn is_id(&mut self) -> Result<bool, Error<'a>> {
     Ok(self.is_id_start()? || self.is_number_start()?)
   }
-  pub fn is_number_start(&mut self) -> Result<bool, LexingError> {
-    let char = self.cursor.peek()?;
+  pub fn is_number_start(&mut self) -> Result<bool, Error<'a>> {
+    let char = self.cursor.peek();
 
     Ok(('0'..='9').contains(&char))
   }
-  pub fn is_number(&mut self) -> Result<bool, LexingError> {
-    let char = self.cursor.peek()?;
+  pub fn is_number(&mut self) -> Result<bool, Error<'a>> {
+    let char = self.cursor.peek();
     Ok(self.is_number_start()? || char == '.')
   }
-  pub fn read_id(&mut self) -> Result<&'a str, LexingError> {
+  pub fn read_id(&mut self) -> Result<&'a str, Error<'a>> {
     self.test(|lexer| lexer.is_id_start())?;
 
     while !self.cursor.eof() && self.is_id()? {
-      self.cursor.next_char()?;
+      self.cursor.next_char();
     }
     let span = self.cursor.span();
     self.cursor.clear_span();
-    Ok(span.expand(&mut self.cursor))
+    Ok(span.expand())
   }
-  pub fn test<F>(&mut self, check: F) -> Result<(), LexingError>
+  pub fn test<F>(&mut self, check: F) -> Result<(), Error<'a>>
   where
-    F: Fn(&mut Self) -> Result<bool, LexingError>,
+    F: Fn(&mut Self) -> Result<bool, Error<'a>>,
   {
     if check(self)? {
-      self.cursor.next_char()?;
+      self.cursor.next_char();
       Ok(())
     } else {
-      Err(LexingError::new(
-        LexingErrorKind::UnexpectedToken,
+      Err(Error::new(
+        ErrorKind::UnexpectedToken,
         self.cursor.span(),
+        self.cursor.source,
       ))
     }
   }
-  pub(crate) fn read_number(&mut self) -> Result<Token<'a>, LexingError> {
+  pub(crate) fn read_number(&mut self) -> Result<Token<'a>, Error<'a>> {
     self.test(|lexer| lexer.is_number_start())?;
     let mut is_float = false;
-    let mut has_error = false; 
+    let mut has_error = false;
     while !self.cursor.eof() && self.is_number()? {
-      if self.cursor.peek()? == '.' {
+      if self.cursor.peek() == '.' {
         if is_float {
           has_error = true;
         }
         is_float = true
       }
-      self.cursor.next_char()?;
+      self.cursor.next_char();
     }
     if has_error {
-      return Err(LexingError::new(
-        LexingErrorKind::TooManyFloatingPoints,
+      return Err(Error::new(
+        ErrorKind::TooManyFloatingPoints,
         self.cursor.span(),
+        self.cursor.source,
       ));
     }
     let span = self.cursor.span();
     self.cursor.clear_span();
-    let slice = span.expand(&mut self.cursor);
+    let slice = span.expand();
 
     if is_float {
       Ok(Token::Float(slice))
@@ -95,14 +98,18 @@ impl<'a> Lexer<'a> {
       Ok(Token::Integer(slice))
     }
   }
-  pub fn consume(&mut self, char: char) -> Result<(), LexingError> {
-    if self.cursor.next_char()? != char {
-      Err(LexingError::new(LexingErrorKind::UnexpectedToken, self.cursor.span()))
+  pub fn consume(&mut self, char: char) -> Result<(), Error<'a>> {
+    if self.cursor.next_char() != char {
+      Err(Error::new(
+        ErrorKind::UnexpectedToken,
+        self.cursor.span(),
+        self.cursor.source,
+      ))
     } else {
       Ok(())
     }
   }
-  pub fn read_keyword(&mut self) -> Result<Token<'a>, LexingError> {
+  pub fn read_keyword(&mut self) -> Result<Token<'a>, Error<'a>> {
     let id = self.read_id()?;
     match id {
       "function" => Ok(Token::Function),
@@ -114,11 +121,11 @@ impl<'a> Lexer<'a> {
       "while" => Ok(Token::While),
       "true" => Ok(Token::True),
       "false" => Ok(Token::False),
-      _ => Ok(Token::Identifier(id))
+      _ => Ok(Token::Identifier(id)),
     }
   }
-  pub fn read_single_char(&mut self) -> Result<Token<'a>, LexingError> {
-    let token = match self.cursor.next_char()? {
+  pub fn read_single_char(&mut self) -> Result<Token<'a>, Error<'a>> {
+    let token = match self.cursor.next_char() {
       '+' => Ok(Token::Plus),
       '-' => {
         if self.cursor.lookup(1)? == '>' {
@@ -126,7 +133,7 @@ impl<'a> Lexer<'a> {
         } else {
           Ok(Token::Minus)
         }
-      },
+      }
       '*' => Ok(Token::Multiply),
       '/' => Ok(Token::Divide),
       ':' => Ok(Token::Colon),
@@ -138,20 +145,20 @@ impl<'a> Lexer<'a> {
       '[' => Ok(Token::LeftSquareBrackets),
       ']' => Ok(Token::RightSquareBrackets),
       '"' => {
-        while self.cursor.next_char()? != '"' {};
-        Ok(Token::String(self.cursor.span().expand(&mut self.cursor)))
-      },
+        while self.cursor.next_char() != '"' {}
+        Ok(Token::String(self.cursor.span().expand()))
+      }
       '>' => {
         if self.cursor.lookup(1)? == '=' {
-          self.cursor.next_char()?;
+          self.cursor.next_char();
           Ok(Token::GreeterEqual)
         } else {
           Ok(Token::Greeter)
         }
-      },
+      }
       '<' => {
         if self.cursor.lookup(1)? == '=' {
-          self.cursor.next_char()?;
+          self.cursor.next_char();
           Ok(Token::LessEqual)
         } else {
           Ok(Token::Less)
@@ -159,30 +166,32 @@ impl<'a> Lexer<'a> {
       }
       '=' => {
         if self.cursor.lookup(1)? == '=' {
-          self.cursor.next_char()?;
+          self.cursor.next_char();
           Ok(Token::Equal)
         } else {
           Ok(Token::Assignment)
         }
       }
-      _ => Err(LexingError::new(
-        LexingErrorKind::UnexpectedToken,
+      _ => Err(Error::new(
+        ErrorKind::UnexpectedToken,
         self.cursor.span(),
+        self.cursor.source,
       )),
     };
     self.cursor.clear_span();
     token
   }
-  pub fn next_token(&mut self) -> Result<Token<'a>, LexingError> {    
+  pub fn next_token(&mut self) -> Result<Token<'a>, Error<'a>> {
     if self.is_id_start()? {
-      return self.read_keyword()
+      return self.read_keyword();
     }
     if self.is_number_start()? {
       return self.read_number();
     }
     self.read_single_char()
   }
-  pub fn next_token_option(&mut self) -> Option<Result<Token<'a>, LexingError>> {
+  pub fn next_token_option(&mut self) -> Option<Result<Token<'a>, Error<'a>>> {
+
     self.skip().ok()?;
     if self.cursor.eof() {
       None

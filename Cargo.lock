@@ -3,12 +3,5 @@
 version = 3
 
 [[package]]
-name = "lexer"
+name = "unnamed"
 version = "0.1.0"
-
-[[package]]
-name = "parser"
-version = "0.1.0"
-dependencies = [
- "lexer",
-]
