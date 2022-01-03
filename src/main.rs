@@ -1,16 +1,22 @@
-use unnamed::{lexer::Lexer, common::source::Source};
+use std::time::Instant;
+
+use unnamed::{lexer::{Lexer}, common::source::Source};
 
 fn main() {
-  let lexer = Lexer::new(Source {
-    path: "src/main.ul",
-    code: "abcd + abcd * abcd 2.2.2"
+  let mut lexer = Lexer::new(Source {
+    code: r#"
+    1.1 + 2.2 // Calculate
+    /*
+      This is block comment
+    */
+    2 + юникод * 2
+    "#,
+    path: "main.ul"
   });
-  for token in lexer {
-    if let Err(err) = token {
-      println!("{:?} \"{} {}:{}\"", err.kind, err.source.path, err.span.start, err.span.end)
-    } else {
-      println!("{:?}", token);
-
-    }
+  let instant = Instant::now();
+  while let Ok(_) = lexer.next_token() {
   }
+  let elapsed = instant.elapsed();
+  println!("{:?}", elapsed)
+  
 }

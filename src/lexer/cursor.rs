@@ -1,60 +1,63 @@
-use crate::common::{error::{Error, ErrorKind}, source::Source, span::Span};
+use crate::common::{
+  error::{Error, ErrorKind},
+  source::Source,
+  span::Span,
+  utils::get_utf8_slice,
+};
 
+use super::Result;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Cursor<'a> {
-  position: usize,
-  start: usize,
-  pub(crate) source: Source<'a>,
+  pub source: Source<'a>,
+  pub start: usize,
+  pub end: usize,
 }
 
 impl<'a> Cursor<'a> {
   pub fn new(source: Source<'a>) -> Self {
     Self {
-      position: 0,
-      start: 0,
       source,
+      start: 0,
+      end: 0,
     }
   }
-  pub fn next_char(&mut self) -> char {
-    let char = self.peek();
-    self.position += 1;
-    char
+  pub fn peek(&self) -> Result<'a, char> {
+    get_utf8_slice(self.source.code, self.end, self.end + 1)
+      .ok_or_else(|| Error::new(ErrorKind::UnexpectedEndOfInput, self.source, self.span()))?
+      .chars()
+      .next()
+      .ok_or_else(|| Error::new(ErrorKind::UnexpectedEndOfInput, self.source, self.span()))
   }
-  pub fn bump(&mut self) -> char {
-    self.position += 1;
-    self.peek()
+  pub fn next(&mut self) {
+    self.end += 1;
   }
-  // Returns char because peek can't be called with eof
-  pub fn peek(&self) -> char {    
-    if self.position == 0 {
-      self.source.code[0..1]
-        .chars().next()
-        .unwrap()
-    } else {
-      self.source.code[self.position..self.position + 1]
-        .chars().next()
-        .unwrap()
-    }
+  pub fn lookup(&mut self, lookup: usize) -> Result<'a, char> {
+    get_utf8_slice(self.source.code, self.end + lookup, self.end + (lookup + 1))
+    .ok_or_else(|| Error::new(ErrorKind::UnexpectedEndOfInput, self.source, self.span()))?
+    .chars()
+    .next()
+    .ok_or_else(|| Error::new(ErrorKind::UnexpectedEndOfInput, self.source, self.span()))
   }
-  pub fn span(&self) -> Span<'a> {
+  pub fn span(&self) -> Span<usize> {
     Span {
       start: self.start,
-      end: self.position,
-      source: self.source
+      end: self.end,
     }
   }
   pub fn clear_span(&mut self) {
-    self.start = self.position;
+    self.start = self.end;
   }
-  pub fn lookup(&mut self, count: usize) -> Result<char, Error<'a>> {
-    let lookup_position = self.position + count;
-    if lookup_position > (self.source.len() - 1) {
-      return Err(Error::new(ErrorKind::UnexpectedEndOfInput, self.span(), self.source))
+  pub fn consume(&mut self, char: char) -> Result<'a, ()> {
+    if self.peek()? == char {
+      self.next();
+      Ok(())
+    } else {
+      Err(Error::new(ErrorKind::UnexpectedToken, self.source, self.span()))
     }
-    Ok(self.source.code[self.position..self.position + count].chars().next().unwrap())
   }
+  #[inline]
   pub fn eof(&self) -> bool {
-    self.position > (self.source.len() - 1)
-  } 
+    self.end > self.source.code.chars().count() - 1
+  }
 }

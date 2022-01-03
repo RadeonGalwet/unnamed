@@ -1,72 +1,37 @@
-#[derive(Debug, Clone, Copy)]
-pub enum Token<'a> {
-  /// Identifier "[a-zA-Z$_]+[a-zA-Z$_]*"
-  Identifier(&'a str),
-  /// Integer "[0-9]+"
-  Integer(&'a str),
-  /// Float "[0-9]+\.[0-9]+"
-  Float(&'a str),
-  /// String "\".+\""
-  String(&'a str),
+use crate::common::{
+  error::{Error, ErrorKind},
+  source::Source,
+  span::Span,
+  utils::get_utf8_slice,
+};
 
-  /// "+" token
+use super::Result;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TokenKind {
+  Identifier,
+  Integer,
+  Float,
   Plus,
-  /// "-" token
   Minus,
-  /// "/" token
-  Divide,
-  /// "*" token
   Multiply,
-  /// "<" token
-  Less,
-  /// "<=" token
-  LessEqual,
-  /// ">" token
-  Greeter,
-  /// ">=" token
-  GreeterEqual,
-  /// "=" token
-  Assignment,
-  /// "==" token
+  Divide,
   Equal,
-  /// ":" token
-  Colon,
-  /// ";" token
-  Semicolon,
-  /// "->" token
-  Arrow,
-
-  /// "(" bracket
-  LeftRoundBrackets,
-  /// ")" bracket
-  RightRoundBrackets,
-  /// "[" bracket
-  LeftSquareBrackets,
-  /// "]" bracket
-  RightSquareBrackets,
-  /// "{" bracket
-  LeftCurlyBrackets,
-  /// "}" bracket
-  RightCurlyBrackets,
-
-  /// "function" keyword
-  Function,
-  /// "module" keyword
-  Module,
-  /// "import" keyword
-  Import,
-  /// "let" keyword
   Let,
-  /// "mutable" keyword
-  Mutable,
-  /// "public" keyword
-  Public,
-  /// "while" keyword
-  While,
-  /// "type" keyword
-  Type,
-  /// "true" literal
-  True,
-  /// "false" literal
-  False,
+  Semicolon,
+  LeftRoundBracket,
+  RightRoundBracket
+}
+#[derive(Clone, Copy, Debug)]
+pub struct Token<'a> {
+  pub kind: TokenKind,
+  pub source: Source<'a>,
+  pub span: Span<usize>,
+}
+
+impl<'a> Token<'a> {
+  pub fn value(&self) -> Result<'a, &'a str> {
+    get_utf8_slice(self.source.code, self.span.start, self.span.end)
+      .ok_or_else(|| Error::new(ErrorKind::UnexpectedEndOfInput, self.source, self.span))
+  }
 }

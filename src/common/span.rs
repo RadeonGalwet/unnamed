@@ -1,17 +1,14 @@
-use super::source::Source;
 
-#[derive(Debug, Clone, Copy)]
-pub struct Span<'a> {
-  pub start: usize,
-  pub end: usize,
-  pub source: Source<'a>,
+
+#[derive(Clone, Copy, Debug)]
+pub struct Span<T: Clone + Copy> {
+  pub start: T,
+  pub end: T,
 }
 
-impl<'a> Span<'a> {
-  pub fn new(start: usize, end: usize, source: Source<'a>) -> Self {
-    Self { start, end, source }
+impl<T: Clone + Copy> Span<T> {
+  pub fn new(start: T, end: T) -> Self {
+    Self { start, end }
   }
-  pub fn expand(&self) -> &'a str {
-    &self.source.code[self.start..self.end]
-  }
+
 }
