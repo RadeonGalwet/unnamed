@@ -5,18 +5,21 @@ use unnamed::{lexer::{Lexer}, common::source::Source};
 fn main() {
   let mut lexer = Lexer::new(Source {
     code: r#"
-    1.1 + 2.2 // Calculate
+    let a = 2; // a is height
+    let b = 3; // b is width
     /*
-      This is block comment
+      Formula:
+      a * b = z
     */
-    2 + юникод * 2
-    "#,
+    let z = a * b;
+    print(z); // print the input
+    "#,   
     path: "main.ul"
   });
-  let instant = Instant::now();
-  while let Ok(_) = lexer.next_token() {
+  let mut buffer = vec![];
+  while let Ok(token) = lexer.next_token() {
+    buffer.push(token.value().unwrap())
   }
-  let elapsed = instant.elapsed();
-  println!("{:?}", elapsed)
+  println!("{}", buffer.join(" "))
   
 }

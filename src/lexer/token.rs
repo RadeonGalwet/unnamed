@@ -16,7 +16,7 @@ pub enum TokenKind {
   Minus,
   Multiply,
   Divide,
-  Equal,
+  Assignment,
   Let,
   Semicolon,
   LeftRoundBracket,

@@ -9,15 +9,7 @@ pub macro token($self: ident, $kind: ident) {
     source: $self.cursor.source
   }
 }
-pub macro product($self: ident, $producer: ident, $token_type: ident) {
-  {
-    
-    $self.$producer()?;
-    let token = token!($self, $token_type);
-    $self.cursor.clear_span();
-    Ok(token)
-  }
-}
+
 pub macro single_product($self: ident, $tt: ident) {
   {
     $self.cursor.next();

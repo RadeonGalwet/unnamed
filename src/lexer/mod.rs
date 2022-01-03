@@ -9,12 +9,12 @@ use unicode_xid::UnicodeXID;
 
 use crate::common::{
   error::{Error, ErrorKind},
-  source::Source,
+  source::Source, utils::get_utf8_slice,
 };
 
 use self::{
   cursor::Cursor,
-  r#macro::{product, single_product},
+  r#macro::{single_product},
   token::Token,
 };
 
@@ -46,12 +46,14 @@ impl<'a> Lexer<'a> {
   pub fn is_block_comment(&mut self) -> Result<'a, bool> {
     Ok(self.cursor.peek()? == '/' && self.cursor.lookup(1)? == '*')
   }
-  pub fn read_id(&mut self) -> Result<'a, ()> {
+  pub fn read_id(&mut self) -> Result<'a, &'a str> {
     self.cursor.next();
     while !self.cursor.eof() && self.is_id_continue()? {
       self.cursor.next();
     }
-    Ok(())
+    let span = self.cursor.span();
+    let slice = get_utf8_slice(self.cursor.source.code, span.start, span.end).unwrap();
+    Ok(slice)
   }
   pub fn skip(&mut self) -> Result<'a, ()> {
     while !self.cursor.eof() && self.cursor.peek()? == ' ' || self.cursor.peek()? == '\n' {
@@ -77,7 +79,7 @@ impl<'a> Lexer<'a> {
     Ok(self.is_number_start()? || char == '.')
   }
   pub fn skip_block_comment(&mut self) -> Result<'a, ()> {
-    while !self.cursor.eof() && self.cursor.peek()? != '*' && self.cursor.lookup(1)? != '/' {
+    while !self.cursor.eof() && (self.cursor.peek()? != '*' || self.cursor.lookup(1)? != '/') {
       self.cursor.next();
     }
     self.cursor.next();
@@ -87,6 +89,8 @@ impl<'a> Lexer<'a> {
   }
   pub fn skip_comments(&mut self) -> Result<'a, ()> {
     if self.is_line_comment()? {
+      self.cursor.next();
+      self.cursor.next();
       self.skip_line_comment()?;
       self.skip()?;
 
@@ -136,6 +140,10 @@ impl<'a> Lexer<'a> {
       '-' => single_product!(self, Minus),
       '*' => single_product!(self, Multiply),
       '/' => single_product!(self, Divide),
+      '=' => single_product!(self, Assignment),
+      '(' => single_product!(self, LeftRoundBracket),
+      ')' => single_product!(self, RightRoundBracket),
+      ';' => single_product!(self, Semicolon),
       _ => Err(Error::new(
         ErrorKind::UnexpectedToken,
         self.cursor.source,
@@ -143,12 +151,20 @@ impl<'a> Lexer<'a> {
       )),
     }
   }
+  pub fn read_keyword_or_id(&mut self) -> Result<'a, Token<'a>> {
+    let token = match self.read_id()? {
+      "let" => token!(self, Let),
+      _ => token!(self, Identifier)
+    };
+    self.cursor.clear_span();
+    Ok(token)
+  }
   pub fn next_token(&mut self) -> Result<'a, Token<'a>> {
     self.skip()?;
     self.skip_comments()?;
     if self.is_id_start()? {
-      return product!(self, read_id, Identifier)
-    };
+      return self.read_keyword_or_id()
+    }
     if self.is_number_start()? {
       return self.read_number()
     }
