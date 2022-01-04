@@ -5,8 +5,7 @@ use crate::common::{
   utils::get_utf8_slice,
 };
 
-use super::Result;
-
+use crate::common::result::Result;
 #[derive(Clone, Copy, Debug)]
 pub struct Cursor<'a> {
   pub source: Source<'a>,
@@ -34,10 +33,10 @@ impl<'a> Cursor<'a> {
   }
   pub fn lookup(&mut self, lookup: usize) -> Result<'a, char> {
     get_utf8_slice(self.source.code, self.end + lookup, self.end + (lookup + 1))
-    .ok_or_else(|| Error::new(ErrorKind::UnexpectedEndOfInput, self.source, self.span()))?
-    .chars()
-    .next()
-    .ok_or_else(|| Error::new(ErrorKind::UnexpectedEndOfInput, self.source, self.span()))
+      .ok_or_else(|| Error::new(ErrorKind::UnexpectedEndOfInput, self.source, self.span()))?
+      .chars()
+      .next()
+      .ok_or_else(|| Error::new(ErrorKind::UnexpectedEndOfInput, self.source, self.span()))
   }
   pub fn span(&self) -> Span<usize> {
     Span {
@@ -53,7 +52,11 @@ impl<'a> Cursor<'a> {
       self.next();
       Ok(())
     } else {
-      Err(Error::new(ErrorKind::UnexpectedToken, self.source, self.span()))
+      Err(Error::new(
+        ErrorKind::UnexpectedToken,
+        self.source,
+        self.span(),
+      ))
     }
   }
   #[inline]

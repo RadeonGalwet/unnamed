@@ -1,25 +1,20 @@
-use std::time::Instant;
-
-use unnamed::{lexer::{Lexer}, common::source::Source};
+use unnamed::{
+  common::{source::Source, utils::get_utf8_slice},
+  lexer::{cursor::Cursor, Lexer},
+  parser::Parser,
+};
 
 fn main() {
-  let mut lexer = Lexer::new(Source {
-    code: r#"
-    let a = 2; // a is height
-    let b = 3; // b is width
-    /*
-      Formula:
-      a * b = z
-    */
-    let z = a * b;
-    print(z); // print the input
-    "#,   
-    path: "main.ul"
-  });
-  let mut buffer = vec![];
-  while let Ok(token) = lexer.next_token() {
-    buffer.push(token.value().unwrap())
-  }
-  println!("{}", buffer.join(" "))
-  
+  let source = Source {
+    path: "main.ul",
+    code: "1 * 2 + 3",
+  };
+  let mut cursor = Cursor::new(source);
+  let lexer = Lexer::new(cursor);
+  let mut parser = Parser::new(lexer.peekable(), source, &mut cursor);
+  let span = parser.expression(0).unwrap().calculate_span();
+  println!(
+    "{}",
+    get_utf8_slice(source.code, span.start, span.end).unwrap()
+  );
 }

@@ -14,3 +14,13 @@ pub fn get_utf8_slice(s: &str, begin: usize, end: usize) -> Option<&str> {
       .map(|(end_pos, _)| &s[start_pos..start_pos + end_pos])
   })
 }
+#[macro_export]
+macro_rules! min {
+  ($x: expr) => ($x);
+  ($x: expr, $($z: expr),+) => (::std::cmp::min($x, min!($($z),*)));
+}
+#[macro_export]
+macro_rules! max {
+  ($x: expr) => ($x);
+  ($x: expr, $($z: expr),+) => (::std::cmp::max($x, max!($($z),*)));
+}

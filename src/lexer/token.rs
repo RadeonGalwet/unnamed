@@ -20,7 +20,7 @@ pub enum TokenKind {
   Let,
   Semicolon,
   LeftRoundBracket,
-  RightRoundBracket
+  RightRoundBracket,
 }
 #[derive(Clone, Copy, Debug)]
 pub struct Token<'a> {

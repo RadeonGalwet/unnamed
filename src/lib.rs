@@ -1,3 +1,4 @@
-#![feature(decl_macro)]
-pub mod lexer;
+#![feature(decl_macro, box_syntax)]
 pub mod common;
+pub mod lexer;
+pub mod parser;

@@ -2,37 +2,30 @@ pub mod cursor;
 pub mod token;
 #[macro_use]
 pub mod r#macro;
+pub mod iter;
 
-use std::result;
-
+use crate::common::result::Result;
 use unicode_xid::UnicodeXID;
 
 use crate::common::{
   error::{Error, ErrorKind},
-  source::Source, utils::get_utf8_slice,
+  utils::get_utf8_slice,
 };
 
-use self::{
-  cursor::Cursor,
-  r#macro::{single_product},
-  token::Token,
-};
+use self::{cursor::Cursor, r#macro::single_product, token::Token};
 
 // Compiler bug
 #[allow(unused_imports)]
 use self::r#macro::token;
 
-type Result<'a, T> = result::Result<T, Error<'a>>;
 #[derive(Clone, Debug)]
 pub struct Lexer<'a> {
   pub cursor: Cursor<'a>,
 }
 
 impl<'a> Lexer<'a> {
-  pub fn new(source: Source<'a>) -> Self {
-    Self {
-      cursor: Cursor::new(source),
-    }
+  pub fn new(cursor: Cursor<'a>) -> Self {
+    Self { cursor }
   }
   pub fn is_id_start(&mut self) -> Result<'a, bool> {
     Ok(UnicodeXID::is_xid_start(self.cursor.peek()?))
@@ -93,14 +86,12 @@ impl<'a> Lexer<'a> {
       self.cursor.next();
       self.skip_line_comment()?;
       self.skip()?;
-
     }
     if self.is_block_comment()? {
       self.cursor.next();
       self.cursor.next();
       self.skip_block_comment()?;
       self.skip()?;
-
     }
     if !self.cursor.eof() && self.is_block_comment()? || self.is_line_comment()? {
       self.skip_comments()?;
@@ -110,7 +101,7 @@ impl<'a> Lexer<'a> {
   pub fn read_number(&mut self) -> Result<'a, Token<'a>> {
     let mut has_error = false;
     let mut is_float = false;
-    while self.is_number_continue()? {
+    while !self.cursor.eof() && self.is_number_continue()? {
       if self.cursor.peek()? == '.' {
         if is_float {
           has_error = true;
@@ -124,7 +115,7 @@ impl<'a> Lexer<'a> {
         ErrorKind::UnexpectedToken,
         self.cursor.source,
         self.cursor.span(),
-      ))
+      ));
     }
     let token = if is_float {
       token!(self, Float)
@@ -154,7 +145,7 @@ impl<'a> Lexer<'a> {
   pub fn read_keyword_or_id(&mut self) -> Result<'a, Token<'a>> {
     let token = match self.read_id()? {
       "let" => token!(self, Let),
-      _ => token!(self, Identifier)
+      _ => token!(self, Identifier),
     };
     self.cursor.clear_span();
     Ok(token)
@@ -163,10 +154,10 @@ impl<'a> Lexer<'a> {
     self.skip()?;
     self.skip_comments()?;
     if self.is_id_start()? {
-      return self.read_keyword_or_id()
+      return self.read_keyword_or_id();
     }
     if self.is_number_start()? {
-      return self.read_number()
+      return self.read_number();
     }
     self.single_char()
   }

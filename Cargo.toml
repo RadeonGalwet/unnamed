@@ -13,3 +13,4 @@ path = "src/main.rs"
 debug = true
 [dependencies]
 unicode-xid = "0.2.2"
+const_fn = "0.4.9"
