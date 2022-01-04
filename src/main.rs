@@ -7,14 +7,23 @@ use unnamed::{
 fn main() {
   let source = Source {
     path: "main.ul",
-    code: "1 * 2 + 3",
+    code: r#"
+    let a = 2 * 2;
+    print(a);
+    "#,
   };
-  let mut cursor = Cursor::new(source);
+  let cursor = Cursor::new(source);
   let lexer = Lexer::new(cursor);
-  let mut parser = Parser::new(lexer.peekable(), source, &mut cursor);
-  let span = parser.expression(0).unwrap().calculate_span();
-  println!(
-    "{}",
-    get_utf8_slice(source.code, span.start, span.end).unwrap()
-  );
+  let mut parser = Parser::new(lexer.peekable(), source, &cursor);
+  let ast = parser.parse();
+  match ast {
+    Ok(node) => println!("{:#?}", node),
+    Err(err) => println!(
+      "{}\n{:?}:{}:{}",
+      get_utf8_slice(err.source.code, err.span.start, err.span.end).unwrap(),
+      err.kind,
+      err.span.start,
+      err.span.end
+    ),
+  }
 }

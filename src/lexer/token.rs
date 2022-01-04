@@ -21,6 +21,7 @@ pub enum TokenKind {
   Semicolon,
   LeftRoundBracket,
   RightRoundBracket,
+  Comma,
 }
 #[derive(Clone, Copy, Debug)]
 pub struct Token<'a> {

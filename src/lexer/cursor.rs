@@ -61,6 +61,6 @@ impl<'a> Cursor<'a> {
   }
   #[inline]
   pub fn eof(&self) -> bool {
-    self.end > self.source.code.chars().count() - 1
+    self.end > (self.source.code.chars().count() - 1)
   }
 }

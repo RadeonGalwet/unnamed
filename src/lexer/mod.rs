@@ -135,6 +135,7 @@ impl<'a> Lexer<'a> {
       '(' => single_product!(self, LeftRoundBracket),
       ')' => single_product!(self, RightRoundBracket),
       ';' => single_product!(self, Semicolon),
+      ',' => single_product!(self, Comma),
       _ => Err(Error::new(
         ErrorKind::UnexpectedToken,
         self.cursor.source,
@@ -151,14 +152,15 @@ impl<'a> Lexer<'a> {
     Ok(token)
   }
   pub fn next_token(&mut self) -> Result<'a, Token<'a>> {
-    self.skip()?;
-    self.skip_comments()?;
-    if self.is_id_start()? {
-      return self.read_keyword_or_id();
-    }
-    if self.is_number_start()? {
-      return self.read_number();
-    }
-    self.single_char()
+    let token = {
+      if self.is_id_start()? {
+        return self.read_keyword_or_id();
+      }
+      if self.is_number_start()? {
+        return self.read_number();
+      }
+      self.single_char()
+    };
+    token
   }
 }

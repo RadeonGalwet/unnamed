@@ -4,6 +4,8 @@ impl<'a> Iterator for Lexer<'a> {
   type Item = Result<'a, Token<'a>>;
 
   fn next(&mut self) -> Option<Self::Item> {
+    self.skip().ok()?;
+    self.skip_comments().ok()?;
     if self.cursor.eof() {
       None
     } else {
